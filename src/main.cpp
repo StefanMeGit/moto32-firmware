@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <Preferences.h>
 
 // ============================================================================
 // PIN DEFINITIONS
@@ -32,7 +33,7 @@
 #define PIN_AUX2_OUT    40   // Auxiliary output 2
 
 // Status LED pins (if available)
-#define LED_STATUS     2    // Built-in LED or status indicator
+#define LED_STATUS     38   // Built-in LED or status indicator
 
 // ============================================================================
 // CONFIGURATION STRUCTURES
@@ -77,6 +78,7 @@ struct Settings {
   uint8_t aux2Mode;           // Menu 10
   uint8_t standKillMode;      // Menu 11
   uint8_t parkingLightMode;   // Menu 12
+  uint16_t turnDistancePulsesTarget; // Menu 13 (pulse target for TURN_DISTANCE)
 };
 
 // ============================================================================
@@ -95,7 +97,8 @@ Settings settings = {
   .aux1Mode = 0,
   .aux2Mode = 0,
   .standKillMode = 0,
-  .parkingLightMode = 0
+  .parkingLightMode = 0,
+  .turnDistancePulsesTarget = 50
 };
 
 // State flags
@@ -128,8 +131,63 @@ unsigned long lastFlasherToggle = 0;
 bool flasherState = false;
 
 // Button debounce
-unsigned long lastDebounceTime = 0;
 const unsigned long DEBOUNCE_DELAY = 50;
+const unsigned long TURN_DISTANCE_TIMEOUT = 10000;
+const uint16_t TURN_DISTANCE_MIN_PULSES = 10;
+const uint16_t TURN_DISTANCE_MAX_PULSES = 1000;
+
+const unsigned long SETUP_FLASH_INTERVAL = 200;
+const unsigned long CALIBRATION_STEP_DURATION = 500;
+
+// Speed sensor pulse tracking (used for TURN_DISTANCE)
+unsigned long speedPulseCount = 0;
+unsigned long leftTurnStartPulses = 0;
+unsigned long rightTurnStartPulses = 0;
+
+// Persistent settings
+Preferences preferences;
+const char* SETTINGS_NAMESPACE = "moto32";
+
+// Emergency hazard ownership flag
+bool emergencyHazardActive = false;
+bool manualHazardRequested = false;
+
+struct ButtonEvent {
+  bool state = false;
+  bool pressed = false;
+  bool released = false;
+  bool longPress = false;
+  bool doubleClick = false;
+  unsigned long pressStartTime = 0;
+  unsigned long lastReleaseTime = 0;
+  bool longPressLatched = false;
+};
+
+ButtonEvent turnLeftEvent;
+ButtonEvent turnRightEvent;
+ButtonEvent lightEvent;
+ButtonEvent startEvent;
+ButtonEvent hornEvent;
+ButtonEvent lockEvent;
+
+enum CalibrationState {
+  CALIB_IDLE,
+  CALIB_RUNNING,
+  CALIB_DONE
+};
+
+CalibrationState calibrationState = CALIB_IDLE;
+int calibrationStepIndex = 0;
+unsigned long calibrationStepStart = 0;
+bool calibrationStepOutputOn = false;
+const int calibrationPins[] = {
+  PIN_TURNL_OUT,
+  PIN_TURNR_OUT,
+  PIN_LIGHT_OUT,
+  PIN_HIBEAM_OUT,
+  PIN_BRAKE_OUT,
+  PIN_AUX1_OUT
+};
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -143,11 +201,164 @@ inline void outputOff(int pin) {
   digitalWrite(pin, LOW);
 }
 
-inline bool inputActive(int pin) {
+inline bool inputRawActive(int pin) {
   if (pin == PIN_LOCK) {
     return digitalRead(pin) == HIGH;  // LOCK connects to +12V
   }
   return digitalRead(pin) == LOW;  // All other inputs switch to ground
+}
+
+bool inputActive(int pin) {
+  static bool initialized[49] = {false};
+  static bool stableState[49] = {false};
+  static bool lastReading[49] = {false};
+  static unsigned long lastChangeTime[49] = {0};
+
+  if (pin < 0 || pin > 48) {
+    return inputRawActive(pin);
+  }
+
+  bool reading = inputRawActive(pin);
+  if (!initialized[pin]) {
+    initialized[pin] = true;
+    stableState[pin] = reading;
+    lastReading[pin] = reading;
+    lastChangeTime[pin] = millis();
+    return stableState[pin];
+  }
+
+  if (reading != lastReading[pin]) {
+    lastReading[pin] = reading;
+    lastChangeTime[pin] = millis();
+  }
+
+  if ((millis() - lastChangeTime[pin]) >= DEBOUNCE_DELAY && stableState[pin] != reading) {
+    stableState[pin] = reading;
+  }
+
+  return stableState[pin];
+}
+
+void saveSettings() {
+  preferences.begin(SETTINGS_NAMESPACE, false);
+  preferences.putUChar("handlebar", settings.handlebarConfig);
+  preferences.putUChar("rear", settings.rearLightMode);
+  preferences.putUChar("turn", settings.turnSignalMode);
+  preferences.putUChar("brake", settings.brakeLightMode);
+  preferences.putUChar("alarm", settings.alarmMode);
+  preferences.putUChar("pos", settings.positionLight);
+  preferences.putBool("wave", settings.moWaveEnabled);
+  preferences.putUChar("low", settings.lowBeamMode);
+  preferences.putUChar("aux1", settings.aux1Mode);
+  preferences.putUChar("aux2", settings.aux2Mode);
+  preferences.putUChar("stand", settings.standKillMode);
+  preferences.putUChar("park", settings.parkingLightMode);
+  preferences.putUShort("tdist", settings.turnDistancePulsesTarget);
+  preferences.end();
+}
+
+void loadSettings() {
+  preferences.begin(SETTINGS_NAMESPACE, true);
+  settings.handlebarConfig = static_cast<HandlebarConfig>(preferences.getUChar("handlebar", settings.handlebarConfig));
+  settings.rearLightMode = preferences.getUChar("rear", settings.rearLightMode);
+  settings.turnSignalMode = static_cast<TurnSignalMode>(preferences.getUChar("turn", settings.turnSignalMode));
+  settings.brakeLightMode = static_cast<BrakeLightMode>(preferences.getUChar("brake", settings.brakeLightMode));
+  settings.alarmMode = preferences.getUChar("alarm", settings.alarmMode);
+  settings.positionLight = preferences.getUChar("pos", settings.positionLight);
+  settings.moWaveEnabled = preferences.getBool("wave", settings.moWaveEnabled);
+  settings.lowBeamMode = preferences.getUChar("low", settings.lowBeamMode);
+  settings.aux1Mode = preferences.getUChar("aux1", settings.aux1Mode);
+  settings.aux2Mode = preferences.getUChar("aux2", settings.aux2Mode);
+  settings.standKillMode = preferences.getUChar("stand", settings.standKillMode);
+  settings.parkingLightMode = preferences.getUChar("park", settings.parkingLightMode);
+  settings.turnDistancePulsesTarget = preferences.getUShort("tdist", settings.turnDistancePulsesTarget);
+  preferences.end();
+
+  settings.handlebarConfig = static_cast<HandlebarConfig>(constrain(settings.handlebarConfig, CONFIG_A, CONFIG_E));
+  settings.turnSignalMode = static_cast<TurnSignalMode>(constrain(settings.turnSignalMode, TURN_OFF, TURN_30S));
+  settings.brakeLightMode = static_cast<BrakeLightMode>(constrain(settings.brakeLightMode, BRAKE_CONTINUOUS, BRAKE_EMERGENCY));
+  settings.positionLight = constrain(settings.positionLight, 0, 9);
+  settings.turnDistancePulsesTarget = constrain(settings.turnDistancePulsesTarget, TURN_DISTANCE_MIN_PULSES, TURN_DISTANCE_MAX_PULSES);
+}
+
+void updateButtonEvent(int pin, ButtonEvent& event, unsigned long longPressMs = 0, unsigned long doubleClickMs = 400) {
+  bool state = inputActive(pin);
+  unsigned long now = millis();
+
+  event.pressed = state && !event.state;
+  event.released = !state && event.state;
+  event.doubleClick = false;
+
+  if (event.pressed) {
+    if (now - event.lastReleaseTime <= doubleClickMs) {
+      event.doubleClick = true;
+    }
+    event.pressStartTime = now;
+    event.longPressLatched = false;
+  }
+
+  if (event.released) {
+    event.lastReleaseTime = now;
+  }
+
+  event.longPress = false;
+  if (state && longPressMs > 0 && !event.longPressLatched && now - event.pressStartTime >= longPressMs) {
+    event.longPress = true;
+    event.longPressLatched = true;
+  }
+
+  event.state = state;
+}
+
+void refreshInputEvents() {
+  updateButtonEvent(PIN_LOCK, lockEvent);
+  updateButtonEvent(PIN_TURNL, turnLeftEvent, 2000);
+  updateButtonEvent(PIN_TURNR, turnRightEvent, 2000);
+  updateButtonEvent(PIN_LIGHT, lightEvent, 2000);
+  updateButtonEvent(PIN_START, startEvent, 0, 500);
+  updateButtonEvent(PIN_HORN, hornEvent, 2000);
+}
+
+inline void resolveHazardState() {
+  hazardLightsOn = emergencyHazardActive || manualHazardRequested;
+}
+
+void startCalibrationSequence() {
+  calibrationState = CALIB_RUNNING;
+  calibrationStepIndex = 0;
+  calibrationStepStart = millis();
+  calibrationStepOutputOn = true;
+  Serial.println("Calibration started");
+  outputOn(calibrationPins[calibrationStepIndex]);
+}
+
+void processCalibrationSequence() {
+  if (calibrationState != CALIB_RUNNING) {
+    return;
+  }
+
+  unsigned long now = millis();
+  if (now - calibrationStepStart < CALIBRATION_STEP_DURATION) {
+    return;
+  }
+
+  if (calibrationStepOutputOn) {
+    outputOff(calibrationPins[calibrationStepIndex]);
+    calibrationStepOutputOn = false;
+    calibrationStepStart = now;
+    return;
+  }
+
+  calibrationStepIndex++;
+  if (calibrationStepIndex >= static_cast<int>(sizeof(calibrationPins) / sizeof(calibrationPins[0]))) {
+    calibrationState = CALIB_DONE;
+    Serial.println("Calibration completed");
+    return;
+  }
+
+  outputOn(calibrationPins[calibrationStepIndex]);
+  calibrationStepOutputOn = true;
+  calibrationStepStart = now;
 }
 
 // Forward declarations
@@ -225,6 +436,10 @@ void updateBrakeLight() {
   if (!brakePressed) {
     outputOff(PIN_BRAKE_OUT);
     brakeFlashState = false;
+    if (emergencyHazardActive) {
+      emergencyHazardActive = false;
+    }
+    resolveHazardState();
     return;
   }
 
@@ -279,7 +494,8 @@ void updateBrakeLight() {
 
     case BRAKE_EMERGENCY:
       // Emergency braking - flash 5Hz + hazard lights
-      hazardLightsOn = true;
+      emergencyHazardActive = true;
+      resolveHazardState();
       if (millis() - lastBrakeFlash >= 200) {
         brakeFlashState = !brakeFlashState;
         lastBrakeFlash = millis();
@@ -288,6 +504,40 @@ void updateBrakeLight() {
         outputOn(PIN_BRAKE_OUT);
       } else {
         outputOff(PIN_BRAKE_OUT);
+      }
+      break;
+
+    case BRAKE_FLASH_2X:
+      // 2x flash then 1s continuous
+      if (millis() - brakePressTime < 800) {
+        if (millis() - lastBrakeFlash >= 200) {
+          brakeFlashState = !brakeFlashState;
+          lastBrakeFlash = millis();
+        }
+        if (brakeFlashState) {
+          outputOn(PIN_BRAKE_OUT);
+        } else {
+          outputOff(PIN_BRAKE_OUT);
+        }
+      } else {
+        outputOn(PIN_BRAKE_OUT);
+      }
+      break;
+
+    case BRAKE_3S_FLASH:
+      // 3s continuous then flashing
+      if (millis() - brakePressTime < 3000) {
+        outputOn(PIN_BRAKE_OUT);
+      } else {
+        if (millis() - lastBrakeFlash >= 200) {
+          brakeFlashState = !brakeFlashState;
+          lastBrakeFlash = millis();
+        }
+        if (brakeFlashState) {
+          outputOn(PIN_BRAKE_OUT);
+        } else {
+          outputOff(PIN_BRAKE_OUT);
+        }
       }
       break;
 
@@ -350,79 +600,63 @@ void updateAuxOutputs() {
 // ============================================================================
 
 void handleLock() {
-  static bool lastLockState = false;
-  bool lockState = inputActive(PIN_LOCK);
-
-  if (lockState != lastLockState) {
-    lastLockState = lockState;
-    if (lockState) {
-      // Cold start: initialize system
-      ignitionOn = true;
-      Serial.println("Ignition ON");
-    } else {
-      ignitionOn = false;
-      engineRunning = false;
-      Serial.println("Ignition OFF");
-    }
+  if (lockEvent.pressed) {
+    ignitionOn = true;
+    Serial.println("Ignition ON");
+  } else if (lockEvent.released) {
+    ignitionOn = false;
+    engineRunning = false;
+    manualHazardRequested = false;
+    Serial.println("Ignition OFF");
   }
 }
 
 void handleTurnSignals() {
-  static bool lastLeftState = false;
-  static bool lastRightState = false;
-  static unsigned long leftPressTime = 0;
-  static unsigned long rightPressTime = 0;
-  static unsigned long hazardStartTime = 0;
+  bool leftState = turnLeftEvent.state;
+  bool rightState = turnRightEvent.state;
 
-  bool leftState = inputActive(PIN_TURNL);
-  bool rightState = inputActive(PIN_TURNR);
-
-  // Detect simultaneous press for hazard lights
-  if (leftState && rightState && !hazardLightsOn) {
-    unsigned long pressDuration = millis() - (leftPressTime > rightPressTime ? leftPressTime : rightPressTime);
-    if (pressDuration >= 2000) {  // Hold for 2 seconds
-      hazardLightsOn = true;
+  // Detect simultaneous long-press for hazard lights (one-shot per press cycle)
+  if (leftState && rightState && (turnLeftEvent.longPress || turnRightEvent.longPress)) {
+    if (!manualHazardRequested && !emergencyHazardActive) {
+      manualHazardRequested = true;
       leftTurnOn = false;
       rightTurnOn = false;
       Serial.println("Hazard lights ON");
+    } else if (manualHazardRequested && !emergencyHazardActive) {
+      manualHazardRequested = false;
+      Serial.println("Hazard lights OFF");
     }
-  } else if (!leftState && !rightState && hazardLightsOn) {
-    // Check if hazard should turn off
-    // In real implementation, this would need more logic
   }
 
   // Left turn signal
-  if (leftState && !rightState && !hazardLightsOn) {
-    if (!lastLeftState) {
-      leftPressTime = millis();
-      leftTurnOn = !leftTurnOn;  // Toggle
-      rightTurnOn = false;
-      leftTurnStartTime = millis();
-      Serial.println("Left turn toggled");
-    }
+  if (turnLeftEvent.pressed && !rightState && !hazardLightsOn) {
+    leftTurnOn = !leftTurnOn;  // Toggle
+    rightTurnOn = false;
+    leftTurnStartTime = millis();
+    leftTurnStartPulses = speedPulseCount;
+    Serial.println("Left turn toggled");
   }
-  lastLeftState = leftState;
 
   // Right turn signal
-  if (rightState && !leftState && !hazardLightsOn) {
-    if (!lastRightState) {
-      rightPressTime = millis();
-      rightTurnOn = !rightTurnOn;  // Toggle
-      leftTurnOn = false;
-      rightTurnStartTime = millis();
-      Serial.println("Right turn toggled");
-    }
+  if (turnRightEvent.pressed && !leftState && !hazardLightsOn) {
+    rightTurnOn = !rightTurnOn;  // Toggle
+    leftTurnOn = false;
+    rightTurnStartTime = millis();
+    rightTurnStartPulses = speedPulseCount;
+    Serial.println("Right turn toggled");
   }
-  lastRightState = rightState;
 
   // Auto-turn-off based on time/distance
   if (leftTurnOn && settings.turnSignalMode != TURN_OFF) {
     unsigned long duration = millis() - leftTurnStartTime;
     unsigned long timeout = 10000;  // Default 10s
+    if (settings.turnSignalMode == TURN_DISTANCE) timeout = TURN_DISTANCE_TIMEOUT;
     if (settings.turnSignalMode == TURN_20S) timeout = 20000;
     if (settings.turnSignalMode == TURN_30S) timeout = 30000;
-    
-    if (duration >= timeout) {
+
+    bool distanceReached = settings.turnSignalMode == TURN_DISTANCE &&
+                           (speedPulseCount - leftTurnStartPulses >= settings.turnDistancePulsesTarget);
+    if (duration >= timeout || distanceReached) {
       leftTurnOn = false;
       Serial.println("Left turn auto-off");
     }
@@ -431,75 +665,63 @@ void handleTurnSignals() {
   if (rightTurnOn && settings.turnSignalMode != TURN_OFF) {
     unsigned long duration = millis() - rightTurnStartTime;
     unsigned long timeout = 10000;  // Default 10s
+    if (settings.turnSignalMode == TURN_DISTANCE) timeout = TURN_DISTANCE_TIMEOUT;
     if (settings.turnSignalMode == TURN_20S) timeout = 20000;
     if (settings.turnSignalMode == TURN_30S) timeout = 30000;
-    
-    if (duration >= timeout) {
+
+    bool distanceReached = settings.turnSignalMode == TURN_DISTANCE &&
+                           (speedPulseCount - rightTurnStartPulses >= settings.turnDistancePulsesTarget);
+    if (duration >= timeout || distanceReached) {
       rightTurnOn = false;
       Serial.println("Right turn auto-off");
     }
   }
 }
 
+void handleSpeedSensor() {
+  static bool lastSpeedState = false;
+  bool speedState = inputActive(PIN_SPEED);
+
+  if (speedState && !lastSpeedState) {
+    speedPulseCount++;
+  }
+  lastSpeedState = speedState;
+}
+
 void handleLight() {
-  static bool lastLightState = false;
-  static unsigned long lightPressTime = 0;
+  if (lightEvent.released) {
+    unsigned long pressDuration = millis() - lightEvent.pressStartTime;
 
-  bool lightState = inputActive(PIN_LIGHT);
-
-  if (lightState != lastLightState) {
-    lastLightState = lightState;
-    if (lightState) {
-      lightPressTime = millis();
-    } else {
-      unsigned long pressDuration = millis() - lightPressTime;
-      
-      if (pressDuration < 500) {
-        // Brief press: toggle high/low beam or flash high beam
-        if (lowBeamOn) {
-          highBeamOn = !highBeamOn;
-        } else {
-          lowBeamOn = true;
-        }
-        Serial.println("Light toggle");
-      } else if (pressDuration >= 2000) {
-        // Long press (2s): light off
-        lowBeamOn = false;
-        highBeamOn = false;
-        Serial.println("Lights OFF");
+    if (pressDuration < 500) {
+      // Brief press: toggle high/low beam or flash high beam
+      if (lowBeamOn) {
+        highBeamOn = !highBeamOn;
+      } else {
+        lowBeamOn = true;
       }
+      Serial.println("Light toggle");
+    } else if (pressDuration >= 2000) {
+      // Long press (2s): light off
+      lowBeamOn = false;
+      highBeamOn = false;
+      Serial.println("Lights OFF");
     }
   }
 }
 
 void handleStart() {
-  static bool lastStartState = false;
-  static unsigned long lastStartPress = 0;
-  static int doubleClickCount = 0;
-
-  bool startState = inputActive(PIN_START);
-
-  if (startState && !lastStartState) {
-    unsigned long timeSinceLastPress = millis() - lastStartPress;
-    
-    if (timeSinceLastPress < 500) {
-      // Double click detected
-      doubleClickCount++;
-      if (doubleClickCount == 2) {
-        // Engine kill
-        engineRunning = false;
-        killActive = true;
-        Serial.println("Engine KILL");
-        doubleClickCount = 0;
-      }
-    } else {
-      doubleClickCount = 1;
-    }
-    
-    lastStartPress = millis();
+  if (startEvent.pressed) {
     startPressed = true;
     startPressTime = millis();
-    
+
+    if (startEvent.doubleClick) {
+      // Engine kill
+      engineRunning = false;
+      killActive = true;
+      Serial.println("Engine KILL");
+      return;
+    }
+
     if (ignitionOn && !killActive) {
       // Start engine
       engineRunning = true;
@@ -509,30 +731,13 @@ void handleStart() {
     }
   }
 
-  if (!startState) {
+  if (startEvent.released) {
     startPressed = false;
   }
-
-  lastStartState = startState;
 }
 
 void handleHorn() {
-  static bool lastHornState = false;
-  static unsigned long hornHoldStart = 0;
-
-  bool hornState = inputActive(PIN_HORN);
-  
-  if (hornState && !lastHornState) {
-    hornHoldStart = millis();
-  }
-
-  // Setup mode entry: hold horn while switching ignition on
-  if (hornState && !ignitionOn) {
-    // Will be handled in setup entry check
-  }
-
-  hornPressed = hornState;
-  lastHornState = hornState;
+  hornPressed = hornEvent.state;
 }
 
 void handleBrake() {
@@ -562,26 +767,34 @@ void handleKill() {
   }
 }
 
+void applySafetyPriorities() {
+  // Priority 1: kill switch always stops engine and starter request
+  if (killActive) {
+    engineRunning = false;
+    startPressed = false;
+  }
+
+  // Priority 2: without ignition, disable non-essential dynamic outputs
+  if (!ignitionOn) {
+    leftTurnOn = false;
+    rightTurnOn = false;
+    manualHazardRequested = false;
+  }
+
+  resolveHazardState();
+}
+
 // ============================================================================
 // SETUP MODE
 // ============================================================================
 
 void enterSetupMode() {
-  if (inputActive(PIN_HORN) && !ignitionOn) {
+  if (hornEvent.state && !ignitionOn) {
     // Hold horn while switching ignition on
     // This is detected in setup()
     inSetupMode = true;
     setupEnterTime = millis();
     Serial.println("Entering SETUP mode");
-    // Flash indicators briefly
-    for (int i = 0; i < 3; i++) {
-      outputOn(PIN_TURNL_OUT);
-      outputOn(PIN_TURNR_OUT);
-      delay(200);
-      outputOff(PIN_TURNL_OUT);
-      outputOff(PIN_TURNR_OUT);
-      delay(200);
-    }
   }
 }
 
@@ -589,39 +802,13 @@ void exitSetupMode() {
   if (inSetupMode) {
     inSetupMode = false;
     Serial.println("Exiting SETUP mode - calibration starting");
-    // Calibration sequence
-    calibrateOutputs();
+    startCalibrationSequence();
   }
 }
 
 void calibrateOutputs() {
-  Serial.println("Calibration started");
-  // Calibrate each output by switching on briefly
-  outputOn(PIN_TURNL_OUT);
-  delay(500);
-  outputOff(PIN_TURNL_OUT);
-  
-  outputOn(PIN_TURNR_OUT);
-  delay(500);
-  outputOff(PIN_TURNR_OUT);
-  
-  outputOn(PIN_LIGHT_OUT);
-  delay(500);
-  outputOff(PIN_LIGHT_OUT);
-  
-  outputOn(PIN_HIBEAM_OUT);
-  delay(500);
-  outputOff(PIN_HIBEAM_OUT);
-  
-  outputOn(PIN_BRAKE_OUT);
-  delay(500);
-  outputOff(PIN_BRAKE_OUT);
-  
-  outputOn(PIN_AUX1_OUT);
-  delay(500);
-  outputOff(PIN_AUX1_OUT);
-  
-  Serial.println("Calibration completed");
+  // Kept for compatibility: starts the non-blocking calibration sequence.
+  startCalibrationSequence();
 }
 
 // ============================================================================
@@ -630,8 +817,8 @@ void calibrateOutputs() {
 
 void setup() {
   Serial.begin(115200);
-  delay(1000);
   Serial.println("mo.unit emulator starting...");
+  loadSettings();
 
   // Configure input pins
   pinMode(PIN_LOCK, INPUT_PULLDOWN);
@@ -679,13 +866,14 @@ void setup() {
   Serial.println("Cold start - LED test");
   for (int i = 0; i < 3; i++) {
     digitalWrite(LED_STATUS, HIGH);
-    delay(200);
+    delay(SETUP_FLASH_INTERVAL);
     digitalWrite(LED_STATUS, LOW);
-    delay(200);
+    delay(SETUP_FLASH_INTERVAL);
   }
 
   // Check for setup mode entry
-  if (inputActive(PIN_HORN)) {
+  refreshInputEvents();
+  if (hornEvent.state) {
     enterSetupMode();
   }
 
@@ -697,11 +885,18 @@ void setup() {
 // ============================================================================
 
 void loop() {
+  refreshInputEvents();
+  processCalibrationSequence();
+
+  if (calibrationState == CALIB_DONE) {
+    calibrationState = CALIB_IDLE;
+    saveSettings();
+  }
+
   // Handle setup mode exit
-  if (inSetupMode && inputActive(PIN_HORN) && millis() - setupEnterTime > 2000) {
+  if (inSetupMode && hornEvent.state && millis() - setupEnterTime > 2000) {
     // Hold horn for 2s to exit setup
     exitSetupMode();
-    delay(500);
     return;
   }
 
@@ -714,6 +909,8 @@ void loop() {
     handleHorn();
     handleBrake();
     handleKill();
+    handleSpeedSensor();
+    applySafetyPriorities();
 
     // Update outputs
     updateIgnition();
@@ -732,7 +929,7 @@ void loop() {
     }
   } else {
     // Setup mode - simplified, just wait for exit
-    if (inputActive(PIN_HORN) && millis() - setupEnterTime > 2000) {
+    if (hornEvent.state && millis() - setupEnterTime > 2000) {
       exitSetupMode();
     }
   }

@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Moto32 Firmware – Technische Tiefenanalyse</title>
+  <style>
+    :root {
+      --bg: #070b14;
+      --panel: #0f1627;
+      --panel-2: #121d33;
+      --text: #e9f1ff;
+      --muted: #9ab0d3;
+      --accent: #4fffb0;
+      --warn: #ffd166;
+      --info: #64b5ff;
+      --danger: #ff6b81;
+      --line: #203052;
+      --chip: #17233d;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, Segoe UI, Roboto, Arial, sans-serif;
+      background: radial-gradient(circle at top, #111b33 0%, var(--bg) 45%);
+      color: var(--text);
+      line-height: 1.55;
+      padding: 24px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: grid;
+      gap: 16px;
+    }
+
+    .card {
+      background: linear-gradient(180deg, var(--panel) 0%, #0b1322 100%);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: 0 8px 30px rgba(0,0,0,.3);
+    }
+
+    h1, h2, h3 { margin: 0 0 10px; line-height: 1.2; }
+    h1 { font-size: 30px; }
+    h2 { font-size: 21px; color: #d8e6ff; }
+    h3 { font-size: 16px; color: #c6dbff; }
+
+    .sub { color: var(--muted); font-size: 14px; }
+
+    .score-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 12px;
+      margin-top: 8px;
+    }
+
+    .score {
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+    }
+
+    .score .value {
+      font-size: 28px;
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+
+    .score .label { color: var(--muted); font-size: 13px; }
+
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+    .chip {
+      background: var(--chip);
+      border: 1px solid #2d4269;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: #d8e6ff;
+    }
+
+    ul { margin: 8px 0 0 18px; padding: 0; }
+    li { margin: 4px 0; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      overflow: hidden;
+      border-radius: 8px;
+    }
+    th, td {
+      border-bottom: 1px solid #26395f;
+      padding: 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: #bfd6ff; font-weight: 600; background: #111d35; }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    @media (min-width: 980px) {
+      .two-col { grid-template-columns: 1fr 1fr; }
+    }
+
+    .ok { color: var(--accent); }
+    .warn { color: var(--warn); }
+    .danger { color: var(--danger); }
+    .info { color: var(--info); }
+
+    .footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+      padding-bottom: 8px;
+    }
+
+    code {
+      background: #14233d;
+      border: 1px solid #28416c;
+      padding: 1px 6px;
+      border-radius: 6px;
+      color: #cff1ff;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <section class="card">
+      <h1>Moto32 Firmware – Technische Tiefenanalyse</h1>
+      <p class="sub">ESP32-S3 · Arduino Framework · Zustandsmaschine für Motorrad-Elektrik (Licht/Blinker/Hupe/Starter/Zündung/AUX)</p>
+      <div class="chips" style="margin-top:10px;">
+        <span class="chip">Firmware-Typ: Embedded C++</span>
+        <span class="chip">Board: ESP32-S3 DevKitC-1 (4MB)</span>
+        <span class="chip">Build: PlatformIO</span>
+        <span class="chip">Dateisystem: LittleFS</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Projektbewertung (technische Einordnung)</h2>
+      <div class="score-grid">
+        <div class="score"><div class="value ok">84</div><div class="label">Architektur & Struktur</div></div>
+        <div class="score"><div class="value info">79</div><div class="label">Funktionsumfang (Features)</div></div>
+        <div class="score"><div class="value warn">73</div><div class="label">Wartbarkeit / Erweiterbarkeit</div></div>
+        <div class="score"><div class="value warn">70</div><div class="label">Robustheit gegen Edge Cases</div></div>
+        <div class="score"><div class="value info">78</div><div class="label">Hardware-Nähe / Echtzeit-Verhalten</div></div>
+      </div>
+      <p class="sub" style="margin-top:12px;">Interpretation: Für ein kompaktes Embedded-Projekt ist die Struktur gut und direkt nachvollziehbar. Die Kernlogik ist funktional, aber ein paar Signalketten können langfristig noch stärker formalisiert werden (z. B. klarere Event-State-Maschine, nicht-blockierende Routinen).</p>
+    </section>
+
+    <section class="card">
+      <h2>1) Was das Projekt genau macht (High-Level)</h2>
+      <ul>
+        <li>Liest mehrere Taster/Schalter als Eingänge (z. B. Lock, Blinker links/rechts, Licht, Start, Hupe, Bremse, Kill).</li>
+        <li>Berechnet daraus Zustände (<code>ignitionOn</code>, <code>engineRunning</code>, <code>leftTurnOn</code>, <code>hazardLightsOn</code> etc.).</li>
+        <li>Steuert entsprechende Ausgänge für Relais/Lampen (Blinker, Abblend-/Fernlicht, Bremslicht, Hupe, Starter, Zündung, AUX).</li>
+        <li>Besitzt Modi für Bremslicht-Pattern und automatische Blinker-Abschaltung (zeit- oder puls-/distanzbasiert).</li>
+        <li>Hat einen Setup-/Kalibrierungsmodus und speichert Einstellungen persistent im NVS über <code>Preferences</code>.</li>
+      </ul>
+    </section>
+
+    <section class="card two-col">
+      <div>
+        <h2>2) Build- & Plattform-Details</h2>
+        <table>
+          <tr><th>Bereich</th><th>Details</th></tr>
+          <tr><td>Buildsystem</td><td>PlatformIO, Environment <code>esp32-s3-devkitc-1</code></td></tr>
+          <tr><td>Framework</td><td>Arduino (ESP32 Core)</td></tr>
+          <tr><td>Board</td><td>Custom Boarddefinition <code>esp32-s3-devkitc-1-4mb</code></td></tr>
+          <tr><td>Flash/Layout</td><td>4MB Flash, Partition mit <code>app0</code> + <code>littlefs</code></td></tr>
+          <tr><td>Filesystem</td><td>LittleFS aktiviert</td></tr>
+          <tr><td>Monitor</td><td>115200 baud, Exception Decoder</td></tr>
+        </table>
+      </div>
+
+      <div>
+        <h2>3) Datei- und Verantwortungsübersicht</h2>
+        <table>
+          <tr><th>Datei</th><th>Zweck</th></tr>
+          <tr><td><code>src/main.cpp</code></td><td>Gesamte Laufzeitlogik (Input, State, Output, Setup, Loop)</td></tr>
+          <tr><td><code>platformio.ini</code></td><td>Build-Konfiguration, Board, Partitionen, Monitoring</td></tr>
+          <tr><td><code>boards/*.json</code></td><td>Boardparameter für ESP32-S3 (Takt, Upload, RAM/Flash)</td></tr>
+          <tr><td><code>default_littlefs_4MB.csv</code></td><td>Partitionstabelle inkl. LittleFS-Bereich</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>4) Eingänge/Ausgänge (I/O-Mapping)</h2>
+      <div class="two-col">
+        <div>
+          <h3>Inputs</h3>
+          <ul>
+            <li><code>PIN_LOCK</code> (46): Zündschloss (HIGH aktiv)</li>
+            <li><code>PIN_TURNL</code> (47), <code>PIN_TURNR</code> (48): Blinker links/rechts</li>
+            <li><code>PIN_LIGHT</code> (21): Lichtbedienung</li>
+            <li><code>PIN_START</code> (22): Startertaster</li>
+            <li><code>PIN_HORN</code> (23): Hupentaster</li>
+            <li><code>PIN_BRAKE</code> (1): Bremsschalter</li>
+            <li><code>PIN_KILL</code> (2): Kill-Switch</li>
+            <li><code>PIN_STAND</code> (3): Seitenständer</li>
+            <li><code>PIN_AUX1</code> (4), <code>PIN_AUX2</code> (5), <code>PIN_SPEED</code> (6)</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Outputs</h3>
+          <ul>
+            <li>Blinker: <code>PIN_TURNL_OUT</code> (9), <code>PIN_TURNR_OUT</code> (10)</li>
+            <li>Licht: <code>PIN_LIGHT_OUT</code> (11), <code>PIN_HIBEAM_OUT</code> (12)</li>
+            <li>Bremslicht: <code>PIN_BRAKE_OUT</code> (13)</li>
+            <li>Hupe: <code>PIN_HORN_OUT</code> (41)</li>
+            <li>Starter: <code>PIN_START_OUT1</code> (44), <code>PIN_START_OUT2</code> (45)</li>
+            <li>Zündung: <code>PIN_IGN_OUT</code> (42)</li>
+            <li>AUX: <code>PIN_AUX1_OUT</code> (43), <code>PIN_AUX2_OUT</code> (40)</li>
+            <li>Status-LED: <code>LED_STATUS</code> (38)</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="card two-col">
+      <div>
+        <h2>5) Zustandsmodell (State-Machine in Worten)</h2>
+        <ul>
+          <li><strong>Zündung:</strong> <code>handleLock()</code> setzt <code>ignitionOn</code> anhand LOCK-Eingang.</li>
+          <li><strong>Motorstatus:</strong> Start setzt <code>engineRunning</code>, Kill/Bedingungen können ihn zurücksetzen.</li>
+          <li><strong>Blinker:</strong> Toggle über Kantenereignisse links/rechts; automatische Abschaltung per Zeit oder Distanzpulsen.</li>
+          <li><strong>Warnblinker:</strong> L+R lang gedrückt schaltet ein/aus; Emergency-Bremse kann Hazard temporär "übernehmen".</li>
+          <li><strong>Licht:</strong> Kurz-/Langdruck auf Lichttaster steuert Low/High-Beam-Verhalten.</li>
+          <li><strong>Bremse:</strong> Mehrere Bremslicht-Modi inkl. Dauerlicht, Flashes, Emergency.</li>
+        </ul>
+      </div>
+      <div>
+        <h2>6) Loop-Ablauf (pro Zyklus)</h2>
+        <ol>
+          <li>Eingänge lesen (<code>handleLock</code>, <code>handleTurnSignals</code>, <code>handleLight</code>, <code>handleStart</code>, <code>handleHorn</code>, <code>handleBrake</code>, <code>handleKill</code>, <code>handleSpeedSensor</code>)</li>
+          <li>Ausgänge schreiben (<code>updateIgnition</code>, <code>updateTurnSignals</code>, <code>updateLights</code>, <code>updateBrakeLight</code>, <code>updateHorn</code>, <code>updateStarter</code>, <code>updateAuxOutputs</code>)</li>
+          <li>Status-LED blinken</li>
+          <li>Kurze Wartezeit <code>delay(10)</code></li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="card two-col">
+      <div>
+        <h2>7) Konfigurierbare Modi & Features</h2>
+        <h3>Blinker-Modi</h3>
+        <ul>
+          <li><code>TURN_OFF</code></li>
+          <li><code>TURN_DISTANCE</code> (Puls-/Distanzabschaltung mit Timeout-Fallback)</li>
+          <li><code>TURN_10S</code>, <code>TURN_20S</code>, <code>TURN_30S</code></li>
+        </ul>
+        <h3>Bremslicht-Modi</h3>
+        <ul>
+          <li><code>BRAKE_CONTINUOUS</code></li>
+          <li><code>BRAKE_FADE</code> (3Hz ähnliches toggeln)</li>
+          <li><code>BRAKE_FLASH_5HZ</code>, <code>BRAKE_FLASH_8X</code></li>
+          <li><code>BRAKE_FLASH_2X</code>, <code>BRAKE_3S_FLASH</code>, <code>BRAKE_EMERGENCY</code></li>
+        </ul>
+      </div>
+      <div>
+        <h2>8) Persistenz (NVS)</h2>
+        <ul>
+          <li>Die Struktur <code>Settings</code> wird über <code>Preferences</code> gelesen/geschrieben.</li>
+          <li>Bei Boot: <code>loadSettings()</code>.</li>
+          <li>Beim Setup-Exit: <code>saveSettings()</code>.</li>
+          <li>Werte werden auf gültige Grenzen geklemmt (z. B. Enum-Bereiche).</li>
+        </ul>
+        <p class="sub">Hinweis: Aktuell wird in der Laufzeit nicht jede mögliche Einstellungsänderung sofort gespeichert – der Save-Trigger liegt am Ende des Setup-Modus.</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>9) Technische Stärken</h2>
+      <ul>
+        <li class="ok">Saubere Funktionsgruppierung (Input-Handling getrennt von Output-Logik).</li>
+        <li class="ok">Klares Pin-Mapping am Dateikopf.</li>
+        <li class="ok">Edge-basierte Tasterauswertung für mehrere Funktionen.</li>
+        <li class="ok">Basisschutz für Starterlaufzeit und Kill-Verhalten vorhanden.</li>
+        <li class="ok">Persistenz + Debounce verbessert Alltagstauglichkeit.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>10) Technische Risiken / Grenzen (wichtig für Deep Understanding)</h2>
+      <ul>
+        <li class="warn"><strong>Timing-Modell:</strong> Viele Features hängen an <code>millis()</code>, plus blockierende <code>delay()</code> in Kalibrierung und Loop (klein, aber vorhanden).</li>
+        <li class="warn"><strong>Distanzmodus:</strong> Verwendet Pulszählung als Proxy. Ohne Kalibrierfaktor (Puls/m) ist es eher ein "Relative Distance"-Modus.</li>
+        <li class="warn"><strong>Globale Zustände:</strong> Für Wachstum (mehr Features) steigt Kopplung schnell; mittelfristig wäre eine explizite Event-/State-Engine stabiler.</li>
+        <li class="info"><strong>Setup/Persistenz:</strong> Speichern aktuell beim Setup-Exit – falls künftig Menüs live geändert werden, ggf. weitere Save-Trigger ergänzen.</li>
+      </ul>
+    </section>
+
+    <section class="card two-col">
+      <div>
+        <h2>11) Konkrete Feature-Liste (kompakt)</h2>
+        <ul>
+          <li>Zündungslogik (LOCK)</li>
+          <li>Motorstart, Kill-Handling, Starter-Limit</li>
+          <li>Low-/High-Beam Schaltlogik</li>
+          <li>Blinker links/rechts + Auto-Off</li>
+          <li>Warnblinker (manuell + emergency-beeinflusst)</li>
+          <li>Mehrere Bremslichtmuster</li>
+          <li>Hupe nur bei Zündung</li>
+          <li>AUX-Ausgänge (derzeit einfach ignition-gebunden)</li>
+          <li>Setup-Mode mit Kalibrier-Sequenz</li>
+          <li>Einstellungs-Persistenz via NVS</li>
+        </ul>
+      </div>
+      <div>
+        <h2>12) Roadmap für nächste Qualitätsstufe</h2>
+        <ol>
+          <li>Nicht-blockierende Kalibrierung (state-driven statt <code>delay</code>).</li>
+          <li>Konfigurierbare Distanzkalibrierung (Puls/m) für echten TURN_DISTANCE.</li>
+          <li>Dediziertes Event-Objekt pro Eingang (Pressed/Released/LongPress/DoubleClick).</li>
+          <li>Unit-Tests für reine Logikpfade (host-seitig mit abstrahierten HAL-Stubs).</li>
+          <li>Optional: Sicherheitsschicht mit Prioritäten (z. B. Emergency > User Toggle).</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>13) Kurz-Erklärung für Nicht-Autor:innen</h2>
+      <p>
+        Stell dir die Firmware wie einen "digitalen Elektromeister" vor: In sehr kurzen Zyklen prüft sie alle Schalter,
+        merkt sich den Systemzustand und schaltet dann die Relais/Lampen entsprechend. Der Code ist linear und gut lesbar,
+        was ideal ist, um ihn zu verstehen und weiterzuentwickeln. Das wichtigste mentale Modell ist: <strong>Input → State → Output</strong>.
+      </p>
+      <p>
+        Wenn du neue Features einbaust, entscheide immer zuerst, ob es ein neues <em>Input-Ereignis</em>, ein neuer <em>Zustand</em>
+        oder nur eine neue <em>Output-Regel</em> ist. Dadurch bleibt die Struktur sauber.
+      </p>
+    </section>
+
+    <div class="footer">Erstellt als technische Projektübersicht für Moto32 Firmware</div>
+  </main>
+</body>
+</html>
