@@ -240,18 +240,19 @@ static void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
 // ============================================================================
 
 void webInit() {
-  // Start LittleFS
-  if (!LittleFS.begin(true)) {
-    LOG_E("LittleFS mount failed!");
-    return;
-  }
-  LOG_I("LittleFS mounted");
-
   // WiFi Access Point
   WiFi.mode(WIFI_AP);
   WiFi.softAP(AP_SSID, AP_PASS);
   LOG_I("WiFi AP started: %s (IP: %s)",
         AP_SSID, WiFi.softAPIP().toString().c_str());
+
+  // Start LittleFS
+  bool fsMounted = LittleFS.begin(true);
+  if (!fsMounted) {
+    LOG_E("LittleFS mount failed! Web UI files unavailable.");
+  } else {
+    LOG_I("LittleFS mounted");
+  }
 
   // mDNS – makes the dashboard accessible via http://moto32.local
   if (MDNS.begin("moto32")) {
@@ -266,7 +267,14 @@ void webInit() {
   server.addHandler(&ws);
 
   // Serve static files from LittleFS
-  server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
+  if (fsMounted) {
+    server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
+  } else {
+    server.on("/", HTTP_GET, [](AsyncWebServerRequest* req) {
+      req->send(503, "text/plain",
+                "LittleFS not mounted. Upload filesystem image and reboot.");
+    });
+  }
 
   // API fallback for REST-style access
   server.on("/api/state", HTTP_GET, [](AsyncWebServerRequest* req) {
