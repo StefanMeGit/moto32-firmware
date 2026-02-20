@@ -1,3 +1,9 @@
+#pragma once
+
+#include <Arduino.h>
+
+// Generated from data/index.html. Keep this file in sync after UI changes.
+static const char WEB_UI_HTML[] PROGMEM = R"WEBUI(
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1637,3 +1643,6 @@ wsConnect();
 </script>
 </body>
 </html>
+)WEBUI";
+
+static constexpr size_t WEB_UI_HTML_LEN = sizeof(WEB_UI_HTML) - 1;

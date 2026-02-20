@@ -7,7 +7,7 @@
 // ============================================================================
 
 struct Settings {
-  HandlebarConfig handlebarConfig = CONFIG_C;
+  HandlebarConfig handlebarConfig = CONFIG_A;
   uint8_t         rearLightMode   = 0;
   TurnSignalMode  turnSignalMode  = TURN_10S;
   BrakeLightMode  brakeLightMode  = BRAKE_CONTINUOUS;
@@ -77,6 +77,13 @@ struct BikeState {
 
   // Starter timing
   unsigned long starterStartTime = 0;
+  bool          starterLightSnapshotValid = false;
+  bool          starterLowBeamBeforeStart = false;
+  bool          starterHighBeamBeforeStart = false;
+
+  // BLE connect blink sequence (left/right quick acknowledgement)
+  bool          bleConnectBlinkActive = false;
+  unsigned long bleConnectBlinkStart = 0;
 
   // Flasher
   unsigned long lastFlasherToggle = 0;

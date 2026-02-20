@@ -194,6 +194,7 @@ void loop() {
 
   // FIX #4 + #6: Safety priorities (kill switch, sidestand, ignition)
   safetyApplyPriorities();
+  handleStarterLightSuppression();
 
   // Write outputs
   updateIgnition();
@@ -205,6 +206,7 @@ void loop() {
   updateAuxOutputs();
   updateParkingLight();
   updateAlarm();
+  webApplyOutputOverrides();
 
   // BLE GATT + Web Dashboard updates
   bleUpdate();

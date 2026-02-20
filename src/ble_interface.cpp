@@ -2,6 +2,7 @@
 #include "settings_store.h"
 #include <NimBLEDevice.h>
 #include <Preferences.h>
+#include <nvs_flash.h>
 
 // ============================================================================
 // GATT SERVER (diagnostics / settings – original)
@@ -26,6 +27,7 @@ static unsigned long lastBleUpdate = 0;
 #define KEYLESS_SCAN_INTERVAL_MS  2000
 #define KEYLESS_DETECT_HOLD_MS    3000   // Must see phone for 3s before unlock
 #define KEYLESS_LOST_TIMEOUT_MS   5000   // Phone must be gone 5s before lock
+#define KEYLESS_SEEN_TIMEOUT_MS   4500   // Keep detection valid for recent scan data
 
 struct PairedDevice {
   bool    valid = false;
@@ -33,6 +35,7 @@ struct PairedDevice {
   char    name[20] = {};
   int     lastRssi = -127;
   bool    detected = false;
+  unsigned long lastSeenMs = 0;
 };
 
 static struct {
@@ -59,46 +62,103 @@ static struct {
 } keyless;
 
 static Preferences keylessPref;
+static const char* KEYLESS_NAMESPACE = "ble_kl";
 
 // ============================================================================
 // KEYLESS PERSISTENCE
 // ============================================================================
 
+static bool beginKeylessPrefsWithRecovery(bool readOnly) {
+  if (keylessPref.begin(KEYLESS_NAMESPACE, readOnly)) return true;
+
+  LOG_E("Keyless NVS open failed (ro=%d)", readOnly ? 1 : 0);
+
+  esp_err_t nvsErr = nvs_flash_init();
+  if (nvsErr == ESP_ERR_NVS_NO_FREE_PAGES
+      || nvsErr == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    LOG_W("Keyless NVS needs erase (%s)", esp_err_to_name(nvsErr));
+    esp_err_t eraseErr = nvs_flash_erase();
+    if (eraseErr != ESP_OK) {
+      LOG_E("Keyless NVS erase failed: %s", esp_err_to_name(eraseErr));
+      return false;
+    }
+    nvsErr = nvs_flash_init();
+  }
+
+  if (nvsErr != ESP_OK) {
+    LOG_E("Keyless NVS init failed: %s", esp_err_to_name(nvsErr));
+    return false;
+  }
+
+  if (!keylessPref.begin(KEYLESS_NAMESPACE, readOnly)) {
+    LOG_E("Keyless NVS reopen failed after recovery");
+    return false;
+  }
+
+  LOG_W("Keyless NVS recovered");
+  return true;
+}
+
 static void saveKeylessConfig() {
-  keylessPref.begin("ble_kl", false);
+  if (!beginKeylessPrefsWithRecovery(false)) {
+    LOG_E("Keyless config save skipped: NVS unavailable");
+    return;
+  }
   keylessPref.putBool("enabled", keyless.enabled);
   keylessPref.putInt("rssi", keyless.rssiThreshold);
   keylessPref.putInt("grace", keyless.graceSeconds);
   keylessPref.putInt("count", keyless.pairedCount);
   for (int i = 0; i < MAX_PAIRED_DEVICES; i++) {
-    char k[12];
-    snprintf(k, sizeof(k), "mac%d", i);
+    char macKey[12];
+    char nameKey[12];
+    snprintf(macKey, sizeof(macKey), "mac%d", i);
+    snprintf(nameKey, sizeof(nameKey), "name%d", i);
     if (keyless.devices[i].valid) {
-      keylessPref.putBytes(k, keyless.devices[i].mac, 6);
-      snprintf(k, sizeof(k), "name%d", i);
-      keylessPref.putString(k, keyless.devices[i].name);
+      keylessPref.putBytes(macKey, keyless.devices[i].mac, 6);
+      keylessPref.putString(nameKey, keyless.devices[i].name);
     } else {
-      keylessPref.remove(k);
+      keylessPref.remove(macKey);
+      keylessPref.remove(nameKey);
     }
   }
   keylessPref.end();
 }
 
 static void loadKeylessConfig() {
-  keylessPref.begin("ble_kl", true);
-  keyless.enabled       = keylessPref.getBool("enabled", false);
-  keyless.rssiThreshold = keylessPref.getInt("rssi", -65);
-  keyless.graceSeconds  = keylessPref.getInt("grace", 10);
-  keyless.pairedCount   = keylessPref.getInt("count", 0);
   for (int i = 0; i < MAX_PAIRED_DEVICES; i++) {
-    char k[12];
-    snprintf(k, sizeof(k), "mac%d", i);
-    if (keylessPref.isKey(k)) {
-      keylessPref.getBytes(k, keyless.devices[i].mac, 6);
-      snprintf(k, sizeof(k), "name%d", i);
-      String n = keylessPref.getString(k, "");
-      strncpy(keyless.devices[i].name, n.c_str(), sizeof(keyless.devices[i].name)-1);
-      keyless.devices[i].valid = true;
+    keyless.devices[i] = PairedDevice{};
+  }
+  keyless.pairedCount = 0;
+
+  if (!beginKeylessPrefsWithRecovery(false)) {
+    keyless.enabled = false;
+    keyless.rssiThreshold = -65;
+    keyless.graceSeconds = 10;
+    LOG_W("Keyless config load fallback: defaults");
+    return;
+  }
+
+  keyless.enabled       = keylessPref.getBool("enabled", false);
+  keyless.rssiThreshold = constrain(keylessPref.getInt("rssi", -65), -90, -30);
+  keyless.graceSeconds  = constrain(keylessPref.getInt("grace", 10), 5, 60);
+  for (int i = 0; i < MAX_PAIRED_DEVICES; i++) {
+    char macKey[12];
+    char nameKey[12];
+    snprintf(macKey, sizeof(macKey), "mac%d", i);
+    snprintf(nameKey, sizeof(nameKey), "name%d", i);
+
+    if (keylessPref.getBytesLength(macKey) == 6) {
+      if (keylessPref.getBytes(macKey, keyless.devices[i].mac, 6) == 6) {
+        String n = keylessPref.getString(nameKey, "");
+        strncpy(keyless.devices[i].name, n.c_str(),
+                sizeof(keyless.devices[i].name) - 1);
+        keyless.devices[i].name[sizeof(keyless.devices[i].name) - 1] = '\0';
+        keyless.devices[i].valid = true;
+        keyless.devices[i].lastRssi = -127;
+        keyless.devices[i].detected = false;
+        keyless.devices[i].lastSeenMs = 0;
+        keyless.pairedCount++;
+      }
     }
   }
   keylessPref.end();
@@ -132,6 +192,8 @@ static bool macEquals(const uint8_t* a, const uint8_t* b) {
 class ServerCB : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer*) override {
     bike.bleConnected = true;
+    bike.bleConnectBlinkActive = true;
+    bike.bleConnectBlinkStart = millis();
     LOG_I("BLE GATT client connected");
   }
   void onDisconnect(NimBLEServer*) override {
@@ -207,16 +269,25 @@ class ScanCB : public NimBLEAdvertisedDeviceCallbacks {
       if (!keyless.devices[i].valid) continue;
       if (macEquals(devMac, keyless.devices[i].mac)) {
         keyless.devices[i].lastRssi = dev->getRSSI();
-        keyless.devices[i].detected =
-            (dev->getRSSI() >= keyless.rssiThreshold);
+        keyless.devices[i].lastSeenMs = millis();
       }
     }
 
     // Store scan results for web UI pairing
     if (keyless.scanActive && scanResultCount < 16) {
-      // Only add devices with names
       std::string name = dev->getName();
-      if (name.empty()) return;
+      std::string label = name;
+      if (label.empty()) {
+        // iPhones often advertise without local-name in BLE scan packets.
+        bool isApple = false;
+        std::string mfg = dev->getManufacturerData();
+        if (mfg.size() >= 2) {
+          const uint16_t companyId =
+              ((uint8_t)mfg[1] << 8) | (uint8_t)mfg[0];
+          isApple = (companyId == 0x004C);
+        }
+        label = isApple ? "Apple Device" : "Unknown Device";
+      }
 
       // Deduplicate
       for (int i = 0; i < scanResultCount; i++) {
@@ -227,8 +298,15 @@ class ScanCB : public NimBLEAdvertisedDeviceCallbacks {
       }
 
       memcpy(scanResults[scanResultCount].mac, devMac, 6);
-      strncpy(scanResults[scanResultCount].name, name.c_str(), 23);
+      memset(scanResults[scanResultCount].name, 0,
+             sizeof(scanResults[scanResultCount].name));
+      strncpy(scanResults[scanResultCount].name, label.c_str(),
+              sizeof(scanResults[scanResultCount].name) - 1);
       scanResults[scanResultCount].rssi = dev->getRSSI();
+      LOG_D("BLE scan result: %s (%s), RSSI=%d",
+            scanResults[scanResultCount].name,
+            macToString(devMac).c_str(),
+            scanResults[scanResultCount].rssi);
       scanResultCount++;
       scanResultsReady = true;
     }
@@ -239,7 +317,15 @@ static ScanCB scanCallback;
 
 // Scan-complete callback (free function for v1.4 API)
 static void onScanComplete(NimBLEScanResults results) {
-  scanResultsReady = true;
+  (void)results;
+
+  if (keyless.scanActive) {
+    keyless.scanActive = false;
+    scanResultsReady = true;
+    LOG_I("BLE scan complete: results=%d", scanResultCount);
+  } else {
+    LOG_D("BLE background scan complete");
+  }
 }
 
 // ============================================================================
@@ -352,6 +438,10 @@ void bleKeylessUpdate() {
   if (!keyless.enabled || keyless.pairedCount == 0) {
     keyless.ignitionGranted = false;
     keyless.phoneDetected = false;
+    keyless.firstDetectTime = 0;
+    for (int i = 0; i < MAX_PAIRED_DEVICES; i++) {
+      keyless.devices[i].detected = false;
+    }
     return;
   }
 
@@ -361,18 +451,26 @@ void bleKeylessUpdate() {
   if (now - keyless.lastScanTime >= KEYLESS_SCAN_INTERVAL_MS) {
     keyless.lastScanTime = now;
     // Short scan burst (non-blocking)
-    if (!keyless.pScan->isScanning()) {
+    if (keyless.pScan && !keyless.pScan->isScanning()) {
       keyless.pScan->start(1, onScanComplete, false);  // 1 second, non-blocking
     }
   }
 
-  // Check if any paired device is in range
+  // Check if any paired device is in range using recent scan freshness.
   bool anyDetected = false;
   for (int i = 0; i < MAX_PAIRED_DEVICES; i++) {
-    if (keyless.devices[i].valid && keyless.devices[i].detected) {
-      anyDetected = true;
-      break;
+    if (!keyless.devices[i].valid) {
+      keyless.devices[i].detected = false;
+      continue;
     }
+
+    const bool seenRecently = keyless.devices[i].lastSeenMs != 0
+        && (now - keyless.devices[i].lastSeenMs) <= KEYLESS_SEEN_TIMEOUT_MS;
+    const bool inRange = seenRecently
+        && (keyless.devices[i].lastRssi >= keyless.rssiThreshold);
+    keyless.devices[i].detected = inRange;
+
+    if (inRange) anyDetected = true;
   }
 
   // ── Phone detection with hysteresis ──
@@ -432,13 +530,6 @@ void bleKeylessUpdate() {
     }
   }
 
-  // Clear device detection flags for next scan cycle
-  for (int i = 0; i < MAX_PAIRED_DEVICES; i++) {
-    if (keyless.devices[i].valid) {
-      // Fade detection if not refreshed by scan
-      // (will be set again by scanCallback if still in range)
-    }
-  }
 }
 
 bool bleKeylessIgnitionAllowed() {
@@ -475,19 +566,27 @@ void bleKeylessConfigure(bool enabled, int rssiThreshold, int graceSeconds) {
 // ============================================================================
 
 void bleStartScan() {
+  if (!keyless.pScan) {
+    LOG_E("BLE scan start failed: scanner not initialized");
+    return;
+  }
+  if (keyless.pScan->isScanning()) {
+    keyless.pScan->stop();
+  }
   scanResultCount = 0;
   scanResultsReady = false;
   keyless.scanActive = true;
   keyless.pScan->start(10, onScanComplete, false);  // 10s active scan
-  LOG_I("BLE scan started");
+  LOG_I("BLE scan started (10s, threshold=%d, paired=%d)",
+        keyless.rssiThreshold, keyless.pairedCount);
 }
 
 void bleStopScan() {
   keyless.scanActive = false;
-  if (keyless.pScan->isScanning()) {
+  if (keyless.pScan && keyless.pScan->isScanning()) {
     keyless.pScan->stop();
   }
-  LOG_I("BLE scan stopped");
+  LOG_I("BLE scan stopped (results=%d)", scanResultCount);
 }
 
 void blePairDevice(const char* macStr) {
@@ -495,6 +594,23 @@ void blePairDevice(const char* macStr) {
   if (!macFromString(macStr, mac)) {
     LOG_W("Invalid MAC: %s", macStr);
     return;
+  }
+
+  // Already paired: keep existing slot and refresh name if available.
+  for (int i = 0; i < MAX_PAIRED_DEVICES; i++) {
+    if (keyless.devices[i].valid && macEquals(keyless.devices[i].mac, mac)) {
+      for (int j = 0; j < scanResultCount; j++) {
+        if (macEquals(scanResults[j].mac, mac)) {
+          strncpy(keyless.devices[i].name, scanResults[j].name,
+                  sizeof(keyless.devices[i].name) - 1);
+          keyless.devices[i].name[sizeof(keyless.devices[i].name) - 1] = '\0';
+          break;
+        }
+      }
+      saveKeylessConfig();
+      LOG_I("Device already paired: %s", macStr);
+      return;
+    }
   }
 
   // Find empty slot
@@ -508,15 +624,20 @@ void blePairDevice(const char* macStr) {
   }
 
   memcpy(keyless.devices[slot].mac, mac, 6);
+  keyless.devices[slot].name[0] = '\0';
   // Try to find name from scan results
   for (int i = 0; i < scanResultCount; i++) {
     if (macEquals(scanResults[i].mac, mac)) {
       strncpy(keyless.devices[slot].name, scanResults[i].name,
               sizeof(keyless.devices[slot].name) - 1);
+      keyless.devices[slot].name[sizeof(keyless.devices[slot].name) - 1] = '\0';
       break;
     }
   }
   keyless.devices[slot].valid = true;
+  keyless.devices[slot].detected = false;
+  keyless.devices[slot].lastSeenMs = 0;
+  keyless.devices[slot].lastRssi = -127;
   keyless.pairedCount++;
   saveKeylessConfig();
   LOG_I("Paired device: %s (%s)", macStr, keyless.devices[slot].name);
@@ -531,7 +652,10 @@ void bleRemovePaired(const char* macStr) {
       keyless.devices[i].valid = false;
       memset(keyless.devices[i].mac, 0, 6);
       keyless.devices[i].name[0] = 0;
-      keyless.pairedCount--;
+      keyless.devices[i].detected = false;
+      keyless.devices[i].lastSeenMs = 0;
+      keyless.devices[i].lastRssi = -127;
+      keyless.pairedCount = max(0, keyless.pairedCount - 1);
       saveKeylessConfig();
       LOG_I("Removed paired device: %s", macStr);
       return;
@@ -580,6 +704,10 @@ void bleKeylessBuildJson(JsonDocument& doc) {
 
   // Scan results – embed directly in keyless document
   doc["scanning"] = keyless.scanActive;
+  doc["scanReady"] = scanResultsReady;
+  doc["scanResultCount"] = scanResultCount;
+  doc["scannerRunning"] =
+      (keyless.pScan != nullptr) ? keyless.pScan->isScanning() : false;
   if (scanResultsReady && scanResultCount > 0) {
     JsonArray devs = doc["scanResults"].to<JsonArray>();
     for (int i = 0; i < scanResultCount; i++) {

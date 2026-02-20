@@ -75,11 +75,33 @@
 # Build
 pio run
 
-# Upload
+# Upload firmware
 pio run --target upload
 
 # Monitor serial output
 pio device monitor
+```
+
+The web dashboard is embedded in firmware (`src/web_ui_embedded.h`), so no
+`uploadfs` step is required.
+
+If you change `data/index.html`, regenerate the embedded header before build:
+
+```bash
+cat > src/web_ui_embedded.h <<'EOF'
+#pragma once
+
+#include <Arduino.h>
+
+// Generated from data/index.html. Keep this file in sync after UI changes.
+static const char WEB_UI_HTML[] PROGMEM = R"WEBUI(
+EOF
+cat data/index.html >> src/web_ui_embedded.h
+cat >> src/web_ui_embedded.h <<'EOF'
+)WEBUI";
+
+static constexpr size_t WEB_UI_HTML_LEN = sizeof(WEB_UI_HTML) - 1;
+EOF
 ```
 
 ### Debug Build

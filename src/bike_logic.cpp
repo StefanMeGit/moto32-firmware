@@ -15,6 +15,7 @@ void handleLock() {
     bike.ignitionOn = false;
     bike.engineRunning = false;
     bike.starterEngaged = false;
+    bike.starterLightSnapshotValid = false;
     bike.manualHazardRequested = false;
     bike.lowBeamOn = false;
     bike.highBeamOn = false;
@@ -139,6 +140,9 @@ void handleStart() {
 
     // Single press: begin starter engagement
     if (bike.ignitionOn && !bike.killActive && !bike.engineRunning) {
+      bike.starterLowBeamBeforeStart = bike.lowBeamOn;
+      bike.starterHighBeamBeforeStart = bike.highBeamOn;
+      bike.starterLightSnapshotValid = true;
       bike.starterEngaged  = true;
       bike.starterStartTime = millis();
       LOG_I("Starter ENGAGED");
@@ -152,7 +156,6 @@ void handleStart() {
     // After engage delay, consider engine running
     if (elapsed >= STARTER_ENGAGE_DELAY_MS && !bike.engineRunning) {
       bike.engineRunning = true;
-      bike.lowBeamOn = true;  // Low beam on after engine start (default)
       bike.killActive = false;
       LOG_I("Engine RUNNING");
     }
@@ -172,6 +175,27 @@ void handleStart() {
       LOG_D("Starter released");
     }
   }
+}
+
+void handleStarterLightSuppression() {
+  static bool prevStarterEngaged = false;
+
+  if (bike.starterEngaged && !prevStarterEngaged) {
+    bike.starterLowBeamBeforeStart = bike.lowBeamOn;
+    bike.starterHighBeamBeforeStart = bike.highBeamOn;
+    bike.starterLightSnapshotValid = true;
+  }
+
+  if (bike.starterEngaged) {
+    bike.lowBeamOn = false;
+    bike.highBeamOn = false;
+  } else if (prevStarterEngaged && bike.starterLightSnapshotValid) {
+    bike.lowBeamOn = bike.starterLowBeamBeforeStart;
+    bike.highBeamOn = bike.starterHighBeamBeforeStart;
+    bike.starterLightSnapshotValid = false;
+  }
+
+  prevStarterEngaged = bike.starterEngaged;
 }
 
 // --------------------------------------------------------------------------
@@ -239,6 +263,33 @@ static void updateWaveFlasher(int pin, bool isActive, unsigned long now) {
 void updateTurnSignals() {
   unsigned long now = millis();
 
+  if (bike.starterEngaged) {
+    outputOff(PIN_TURNL_OUT);
+    outputOff(PIN_TURNR_OUT);
+    return;
+  }
+
+  // BLE connect acknowledgement: blink left/right once quickly.
+  if (bike.bleConnectBlinkActive) {
+    unsigned long elapsed = now - bike.bleConnectBlinkStart;
+    if (elapsed < 120) {
+      outputOn(PIN_TURNL_OUT);
+      outputOff(PIN_TURNR_OUT);
+    } else if (elapsed < 180) {
+      outputOff(PIN_TURNL_OUT);
+      outputOff(PIN_TURNR_OUT);
+    } else if (elapsed < 300) {
+      outputOff(PIN_TURNL_OUT);
+      outputOn(PIN_TURNR_OUT);
+    } else if (elapsed < 360) {
+      outputOff(PIN_TURNL_OUT);
+      outputOff(PIN_TURNR_OUT);
+    } else {
+      bike.bleConnectBlinkActive = false;
+    }
+    return;
+  }
+
   // Standard flasher logic for non-wave mode
   bool useWave = settings.moWaveEnabled && !bike.hazardLightsOn;
 
@@ -298,8 +349,14 @@ void updateLights() {
     return;
   }
 
+  if (bike.starterEngaged) {
+    outputOff(PIN_LIGHT_OUT);
+    outputOff(PIN_HIBEAM_OUT);
+    return;
+  }
+
   // Low beam mode:
-  //   0 = auto on after engine start (default, handled in handleStart)
+  //   0 = standard state-driven behavior
   //   1 = always on with ignition
   //   2 = manual only (user toggles)
   if (settings.lowBeamMode == 1 && !bike.lowBeamOn) {
@@ -332,6 +389,11 @@ void updateLights() {
 // --------------------------------------------------------------------------
 
 void updateBrakeLight() {
+  if (bike.starterEngaged) {
+    outputOff(PIN_BRAKE_OUT);
+    return;
+  }
+
   if (!bike.brakePressed) {
     // When not braking, check rear light mode for tail light behavior
     if (bike.ignitionOn && settings.rearLightMode == 1) {

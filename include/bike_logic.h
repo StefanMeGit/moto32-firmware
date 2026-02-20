@@ -7,6 +7,7 @@ void handleLock();
 void handleTurnSignals();
 void handleLight();
 void handleStart();
+void handleStarterLightSuppression();
 void handleHorn();
 void handleBrake();
 

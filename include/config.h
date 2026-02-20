@@ -132,7 +132,7 @@ static const int CALIBRATION_PIN_COUNT = sizeof(CALIBRATION_PINS) / sizeof(CALIB
 #define ALARM_TRIGGER_WINDOW_MS    2000     // Window for counting vibration hits
 
 // Watchdog
-#define WATCHDOG_TIMEOUT_S            3
+#define WATCHDOG_TIMEOUT_S            8
 
 // Battery voltage thresholds
 #define VBAT_DIVIDER_RATIO        5.7f     // 47k + 10k voltage divider

@@ -1,11 +1,48 @@
 #include "settings_store.h"
 #include <Preferences.h>
+#include <nvs_flash.h>
 
 static Preferences preferences;
 static const char* NAMESPACE = "moto32";
 
+static bool beginPreferencesWithRecovery(Preferences& pref,
+                                         const char* nameSpace,
+                                         bool readOnly) {
+  if (pref.begin(nameSpace, readOnly)) return true;
+
+  LOG_E("NVS open failed for '%s' (ro=%d)", nameSpace, readOnly ? 1 : 0);
+
+  esp_err_t nvsErr = nvs_flash_init();
+  if (nvsErr == ESP_ERR_NVS_NO_FREE_PAGES
+      || nvsErr == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    LOG_W("NVS requires erase (%s), reinitializing", esp_err_to_name(nvsErr));
+    esp_err_t eraseErr = nvs_flash_erase();
+    if (eraseErr != ESP_OK) {
+      LOG_E("NVS erase failed: %s", esp_err_to_name(eraseErr));
+      return false;
+    }
+    nvsErr = nvs_flash_init();
+  }
+
+  if (nvsErr != ESP_OK) {
+    LOG_E("NVS init failed: %s", esp_err_to_name(nvsErr));
+    return false;
+  }
+
+  if (!pref.begin(nameSpace, readOnly)) {
+    LOG_E("NVS reopen failed for '%s' after recovery", nameSpace);
+    return false;
+  }
+
+  LOG_W("NVS recovered for '%s'", nameSpace);
+  return true;
+}
+
 void saveSettings() {
-  preferences.begin(NAMESPACE, false);
+  if (!beginPreferencesWithRecovery(preferences, NAMESPACE, false)) {
+    LOG_E("Settings save skipped: NVS unavailable");
+    return;
+  }
   preferences.putUChar ("handlebar", settings.handlebarConfig);
   preferences.putUChar ("rear",      settings.rearLightMode);
   preferences.putUChar ("turn",      settings.turnSignalMode);
@@ -24,7 +61,11 @@ void saveSettings() {
 }
 
 void loadSettings() {
-  preferences.begin(NAMESPACE, true);
+  if (!beginPreferencesWithRecovery(preferences, NAMESPACE, false)) {
+    LOG_W("Settings load fallback: using in-memory defaults");
+    settings = Settings{};
+    return;
+  }
   settings.handlebarConfig  = static_cast<HandlebarConfig>(
       preferences.getUChar("handlebar", settings.handlebarConfig));
   settings.rearLightMode    = preferences.getUChar ("rear",  settings.rearLightMode);
