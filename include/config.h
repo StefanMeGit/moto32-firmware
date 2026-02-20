@@ -136,6 +136,7 @@ static const int CALIBRATION_PIN_COUNT = sizeof(CALIBRATION_PINS) / sizeof(CALIB
 
 // Battery voltage thresholds
 #define VBAT_DIVIDER_RATIO        5.7f     // 47k + 10k voltage divider
+#define VBAT_PRESENT_MIN_VOLTAGE  6.0f     // Below this, treat VBAT input as disconnected/floating
 #define VBAT_WARNING_LOW         11.0f     // Low voltage warning
 #define VBAT_CRITICAL_LOW        10.0f     // Critical – shutdown non-essential
 #define VBAT_WARNING_HIGH        15.0f     // Overvoltage warning
