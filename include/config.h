@@ -33,42 +33,42 @@ enum LogLevel : uint8_t {
 // ============================================================================
 // PIN DEFINITIONS – INPUTS (active LOW unless noted)
 // ============================================================================
-#define PIN_LOCK       46    // Ignition lock (active HIGH – connects to +12V)
-#define PIN_TURNL      47    // Turn left
-#define PIN_TURNR      48    // Turn right
-#define PIN_LIGHT      21    // Light control
-#define PIN_START      22    // Starter button
-#define PIN_HORN       23    // Horn button
-#define PIN_BRAKE       1    // Brake switch (front/rear parallel)
-#define PIN_KILL        2    // Kill switch
-#define PIN_STAND       3    // Side stand switch
-#define PIN_AUX1        4    // Auxiliary input 1
-#define PIN_AUX2        5    // Auxiliary input 2
-#define PIN_SPEED       6    // Speed sensor (pulse input)
+#define PIN_LOCK       39    // Ignition lock (active HIGH – connects to +12V)
+#define PIN_TURNL      36    // Turn left
+#define PIN_TURNR      34    // Turn right
+#define PIN_LIGHT      32    // Light control
+#define PIN_START      33    // Starter button
+#define PIN_HORN       25    // Horn button
+#define PIN_BRAKE      26    // Brake switch (front/rear parallel)
+#define PIN_KILL       27    // Kill switch
+#define PIN_STAND      14    // Side stand switch
+#define PIN_AUX1       12    // Auxiliary input 1
+#define PIN_AUX2       13    // Auxiliary input 2
+#define PIN_SPEED      23    // Speed sensor (pulse input)
 
 // ============================================================================
 // PIN DEFINITIONS – OUTPUTS (HIGH = on, MOSFET switches +12V)
 // ============================================================================
-#define PIN_TURNL_OUT    9   // Left turn indicator
-#define PIN_TURNR_OUT   10   // Right turn indicator
-#define PIN_LIGHT_OUT   11   // Low beam
-#define PIN_HIBEAM_OUT  12   // High beam
-#define PIN_BRAKE_OUT   13   // Brake light
-#define PIN_HORN_OUT    41   // Horn relay
-#define PIN_START_OUT1  44   // Starter output 1 (2 wires for 30A)
-#define PIN_START_OUT2  45   // Starter output 2
-#define PIN_IGN_OUT     42   // Ignition system
-#define PIN_AUX1_OUT    43   // Auxiliary output 1
-#define PIN_AUX2_OUT    40   // Auxiliary output 2
+#define PIN_TURNL_OUT   22   // Left turn indicator
+#define PIN_TURNR_OUT   21   // Right turn indicator
+#define PIN_LIGHT_OUT   19   // Low beam
+#define PIN_HIBEAM_OUT  18   // High beam
+#define PIN_BRAKE_OUT   17   // Brake light
+#define PIN_HORN_OUT    16   // Horn relay
+#define PIN_START_OUT1   5   // Starter output 1 (2 wires for 30A)
+#define PIN_START_OUT2   4   // Starter output 2
+#define PIN_IGN_OUT      2   // Ignition system
+#define PIN_AUX1_OUT    15   // Auxiliary output 1
+#define PIN_AUX2_OUT     0   // Auxiliary output 2
 
 // Status LED
-#define LED_STATUS      38
+#define LED_STATUS       3
 
-// ESP32-S3 max GPIO index + 1 (GPIOs 0-48)
-#define MAX_PIN         49
+// ESP32 max GPIO index + 1 (GPIOs 0-39)
+#define MAX_PIN         40
 
 // Battery voltage ADC (needs external voltage divider 47k/10k)
-#define PIN_VBAT_ADC     7
+#define PIN_VBAT_ADC    35
 
 // Vibration/shock sensor for alarm (shares AUX2 input when alarm enabled)
 #define PIN_VIBRATION    PIN_AUX2

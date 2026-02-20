@@ -1,7 +1,7 @@
 # Moto32 Firmware
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Platform: ESP32-S3](https://img.shields.io/badge/Platform-ESP32--S3-blue.svg)](https://www.espressif.com/)
+[![Platform: ESP32--WROOM--32D](https://img.shields.io/badge/Platform-ESP32--WROOM--32D-blue.svg)](https://www.espressif.com/)
 [![PlatformIO](https://img.shields.io/badge/Build-PlatformIO-orange.svg)](https://platformio.org/)
 
 **Open-source motorcycle control unit firmware** for the [Moto32 hardware](https://github.com/moto32/moto32-hardware). A complete alternative to the Motogadget M-Unit Blue.
@@ -31,36 +31,36 @@
 
 | Pin | Function | Type |
 |-----|----------|------|
-| 46 | Ignition lock | Active HIGH (12V) |
-| 47 | Turn left | Active LOW |
-| 48 | Turn right | Active LOW |
-| 21 | Light control | Active LOW |
-| 22 | Starter button | Active LOW |
-| 23 | Horn button | Active LOW |
-| 1 | Brake switch | Active LOW |
-| 2 | Kill switch | Active LOW |
-| 3 | Sidestand switch | Active LOW |
-| 4 | AUX input 1 | Active LOW |
-| 5 | AUX input 2 | Active LOW |
-| 6 | Speed sensor | Pulse input |
-| 7 | Battery voltage | ADC (voltage divider) |
+| 39 | Ignition lock | Active HIGH (12V) |
+| 36 | Turn left | Active LOW |
+| 34 | Turn right | Active LOW |
+| 32 | Light control | Active LOW |
+| 33 | Starter button | Active LOW |
+| 25 | Horn button | Active LOW |
+| 26 | Brake switch | Active LOW |
+| 27 | Kill switch | Active LOW |
+| 14 | Sidestand switch | Active LOW |
+| 12 | AUX input 1 | Active LOW |
+| 13 | AUX input 2 | Active LOW |
+| 23 | Speed sensor | Pulse input |
+| 35 | Battery voltage | ADC1 (voltage divider) |
 
 ### Outputs
 
 | Pin | Function | Notes |
 |-----|----------|-------|
-| 9 | Left turn | MOSFET, HIGH = on |
-| 10 | Right turn | MOSFET, HIGH = on |
-| 11 | Low beam | MOSFET + PWM capable |
-| 12 | High beam | MOSFET |
-| 13 | Brake light | MOSFET + PWM capable |
-| 41 | Horn relay | MOSFET |
-| 44 | Starter out 1 | MOSFET (2 pins for 30A) |
-| 45 | Starter out 2 | MOSFET (⚠ strapping pin) |
-| 42 | Ignition | MOSFET |
-| 43 | AUX output 1 | MOSFET |
-| 40 | AUX output 2 | MOSFET |
-| 38 | Status LED | GPIO |
+| 22 | Left turn | MOSFET, HIGH = on |
+| 21 | Right turn | MOSFET, HIGH = on |
+| 19 | Low beam | MOSFET + PWM capable |
+| 18 | High beam | MOSFET |
+| 17 | Brake light | MOSFET + PWM capable |
+| 16 | Horn relay | MOSFET |
+| 5 | Starter out 1 | MOSFET (2 pins for 30A) |
+| 4 | Starter out 2 | MOSFET |
+| 2 | Ignition | MOSFET |
+| 15 | AUX output 1 | MOSFET |
+| 0 | AUX output 2 | MOSFET |
+| 3 | Status LED | GPIO |
 
 ## Building
 
@@ -130,7 +130,7 @@ Connect with any BLE scanner app (e.g., nRF Connect) to `Moto32`.
 ├── test/
 │   └── roadmap_logic_tests.cpp
 ├── boards/
-│   └── esp32-s3-devkitc-1-4mb.json
+│   └── esp32-s3-devkitc-1-4mb.json   # legacy S3 board profile (unused)
 ├── partitions_ota.csv
 └── platformio.ini
 ```

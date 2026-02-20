@@ -1,7 +1,7 @@
 // ============================================================================
 // MOTO32 FIRMWARE v2.2.0
 // Open-Source Motorcycle Control Unit
-// ESP32-S3 based – Motogadget M-Unit Blue alternative
+// ESP32-WROOM-32D based – Motogadget M-Unit Blue alternative
 //
 // Changelog v2.2 (from v2.1):
 //   NEW: mo.wave sequential turn signal animation (PWM brightness sweep)
@@ -70,8 +70,8 @@ ButtonEvent lockEvent;
 void setup() {
   // ---------------------------------------------------------------
   // FIX #1: Initialize outputs FIRST – before Serial, before anything.
-  // This prevents MOSFET gates from floating during ESP32-S3 boot.
-  // GPIO45 (starter) is a strapping pin and can glitch HIGH!
+  // This prevents MOSFET gates from floating during ESP32-WROOM-32D boot.
+  // Strapping pins must be handled carefully to avoid boot glitches.
   // ---------------------------------------------------------------
   outputsInitEarly();
 
