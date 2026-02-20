@@ -9,6 +9,7 @@
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
+#include <Update.h>
 
 static AsyncWebServer  server(80);
 static AsyncWebSocket  ws("/ws");
@@ -59,8 +60,9 @@ static void buildStateJson(JsonDocument& doc) {
   outs["start1"]   = bike.starterEngaged;
   outs["start2"]   = bike.starterEngaged;
   outs["ignOut"]   = bike.ignitionOn && !bike.killActive;
-  outs["aux1Out"]  = settings.aux1Mode == 0 && bike.ignitionOn;
-  outs["aux2Out"]  = settings.aux2Mode == 0 && bike.ignitionOn;
+  // AUX outputs reflect actual state based on current mode
+  outs["aux1Out"]  = digitalRead(PIN_AUX1_OUT) == HIGH;
+  outs["aux2Out"]  = digitalRead(PIN_AUX2_OUT) == HIGH;
 
   // Hazard override
   if (bike.hazardLightsOn && bike.flasherState) {
@@ -137,7 +139,7 @@ static void handleWsMessage(AsyncWebSocketClient* client, const char* data, size
     // Send confirmation
     JsonDocument resp;
     resp["type"] = "toast";
-    resp["text"] = "Einstellungen gespeichert";
+    resp["text"] = "settings_saved";  // i18n key – frontend resolves to localized text
     resp["level"] = "success";
     String out;
     serializeJson(resp, out);
@@ -191,6 +193,23 @@ static void handleWsMessage(AsyncWebSocketClient* client, const char* data, size
   else if (strcmp(cmd, "removePaired") == 0) {
     const char* mac = doc["mac"];
     if (mac) bleRemovePaired(mac);
+  }
+
+  // ---- AUX Manual Toggle ----
+  else if (strcmp(cmd, "toggleAux1") == 0) {
+    bike.aux1ManualOn = !bike.aux1ManualOn;
+    LOG_D("AUX1 manual: %s", bike.aux1ManualOn ? "ON" : "OFF");
+  }
+  else if (strcmp(cmd, "toggleAux2") == 0) {
+    bike.aux2ManualOn = !bike.aux2ManualOn;
+    LOG_D("AUX2 manual: %s", bike.aux2ManualOn ? "ON" : "OFF");
+  }
+
+  // ---- Restart ----
+  else if (strcmp(cmd, "restart") == 0) {
+    LOG_I("Restart requested via Web");
+    delay(100);
+    esp_restart();
   }
 }
 
@@ -261,6 +280,68 @@ void webInit() {
   server.on("/api/settings", HTTP_GET, [](AsyncWebServerRequest* req) {
     JsonDocument doc;
     buildSettingsJson(doc);
+    String out;
+    serializeJson(doc, out);
+    req->send(200, "application/json", out);
+  });
+
+  // ---- OTA Firmware Update ----
+  server.on("/api/ota", HTTP_POST,
+    // Response callback (called when upload finishes)
+    [](AsyncWebServerRequest* req) {
+      bool success = !Update.hasError();
+      JsonDocument doc;
+      doc["type"] = "toast";
+      doc["text"] = success ? "ota_success" : "ota_failed";
+      doc["level"] = success ? "success" : "error";
+      String out;
+      serializeJson(doc, out);
+      // Broadcast OTA result to all WS clients
+      ws.textAll(out);
+      req->send(200, "application/json",
+                success ? "{\"ok\":true}" : "{\"ok\":false}");
+      if (success) {
+        LOG_I("OTA update successful – restarting...");
+        delay(500);
+        esp_restart();
+      }
+    },
+    // Upload handler (called for each chunk)
+    [](AsyncWebServerRequest* req, const String& filename,
+       size_t index, uint8_t* data, size_t len, bool final) {
+      if (index == 0) {
+        LOG_I("OTA: begin '%s' (%u bytes)", filename.c_str(),
+              req->contentLength());
+        // Determine if this is firmware or filesystem
+        int cmd = (filename.indexOf("littlefs") >= 0 ||
+                   filename.indexOf("spiffs") >= 0)
+                      ? U_SPIFFS : U_FLASH;
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN, cmd)) {
+          LOG_E("OTA: begin failed: %s", Update.errorString());
+        }
+      }
+      if (Update.isRunning()) {
+        if (Update.write(data, len) != len) {
+          LOG_E("OTA: write failed: %s", Update.errorString());
+        }
+      }
+      if (final) {
+        if (Update.end(true)) {
+          LOG_I("OTA: upload complete (%u bytes)", index + len);
+        } else {
+          LOG_E("OTA: end failed: %s", Update.errorString());
+        }
+      }
+    }
+  );
+
+  // ---- Firmware Version API ----
+  server.on("/api/version", HTTP_GET, [](AsyncWebServerRequest* req) {
+    JsonDocument doc;
+    doc["firmware"] = FIRMWARE_VERSION_STRING;
+    doc["chip"]     = ESP.getChipModel();
+    doc["freeHeap"] = ESP.getFreeHeap();
+    doc["uptime"]   = millis() / 1000;
     String out;
     serializeJson(doc, out);
     req->send(200, "application/json", out);

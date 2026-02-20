@@ -578,17 +578,15 @@ void bleKeylessBuildJson(JsonDocument& doc) {
     d["connected"] = keyless.devices[i].detected;
   }
 
-  // Scan results (if scanning)
+  // Scan results – embed directly in keyless document
+  doc["scanning"] = keyless.scanActive;
   if (scanResultsReady && scanResultCount > 0) {
-    JsonDocument scanDoc;
-    scanDoc["type"] = "scan";
-    JsonArray devs = scanDoc["devices"].to<JsonArray>();
+    JsonArray devs = doc["scanResults"].to<JsonArray>();
     for (int i = 0; i < scanResultCount; i++) {
       JsonObject d = devs.add<JsonObject>();
       d["mac"] = macToString(scanResults[i].mac);
       d["name"] = scanResults[i].name;
       d["rssi"] = scanResults[i].rssi;
     }
-    // Merge into doc (separate type will be sent by webUpdate)
   }
 }

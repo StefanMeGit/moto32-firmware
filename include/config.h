@@ -6,9 +6,9 @@
 // FIRMWARE VERSION
 // ============================================================================
 #define FIRMWARE_VERSION_MAJOR  2
-#define FIRMWARE_VERSION_MINOR  1
+#define FIRMWARE_VERSION_MINOR  2
 #define FIRMWARE_VERSION_PATCH  0
-#define FIRMWARE_VERSION_STRING "2.1.0"
+#define FIRMWARE_VERSION_STRING "2.2.0"
 
 // ============================================================================
 // LOG SYSTEM
@@ -148,6 +148,8 @@ static const int CALIBRATION_PIN_COUNT = sizeof(CALIBRATION_PINS) / sizeof(CALIB
 #define PWM_RESOLUTION_BITS         8      // 0-255
 #define PWM_CHANNEL_BRAKE           0
 #define PWM_CHANNEL_POSITION        1
+#define PWM_CHANNEL_TURNL           2      // mo.wave left turn
+#define PWM_CHANNEL_TURNR           3      // mo.wave right turn
 
 // BLE
 #define BLE_DEVICE_NAME        "Moto32"

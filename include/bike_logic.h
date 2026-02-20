@@ -18,3 +18,5 @@ void updateBrakeLight();
 void updateHorn();
 void updateStarter();
 void updateAuxOutputs();
+void updateParkingLight();
+void updateAlarm();

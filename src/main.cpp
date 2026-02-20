@@ -1,7 +1,22 @@
 // ============================================================================
-// MOTO32 FIRMWARE v2.1.0
+// MOTO32 FIRMWARE v2.2.0
 // Open-Source Motorcycle Control Unit
 // ESP32-S3 based – Motogadget M-Unit Blue alternative
+//
+// Changelog v2.2 (from v2.1):
+//   NEW: mo.wave sequential turn signal animation (PWM brightness sweep)
+//   NEW: AUX output modes (ignition / engine / manual / disabled)
+//   NEW: Parking light modes (position / left blinker / right blinker)
+//   NEW: Rear light / tail light modes (standard / dimmed / always-on)
+//   NEW: Alarm system (vibration sensor, horn + flash, auto-arm/disarm)
+//   NEW: OTA firmware update via web dashboard (/api/ota)
+//   NEW: Version API endpoint (/api/version)
+//   NEW: WebSocket AUX toggle + restart commands
+//   FIX: Scan results now forwarded to web UI via keyless JSON
+//   FIX: Watchdog API migrated to ESP-IDF v5.x (backward compatible)
+//   FIX: AUX output state in web dashboard reflects actual pin state
+//   FIX: Toast messages use i18n keys (language-neutral)
+//   FIX: Turn signal PWM channels added for mo.wave
 //
 // Changelog v2.1 (from v2.0):
 //   NEW: Web Dashboard (WiFi AP + AsyncWebServer + WebSocket)
@@ -188,6 +203,8 @@ void loop() {
   updateHorn();
   updateStarter();
   updateAuxOutputs();
+  updateParkingLight();
+  updateAlarm();
 
   // BLE GATT + Web Dashboard updates
   bleUpdate();

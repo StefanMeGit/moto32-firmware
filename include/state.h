@@ -111,6 +111,10 @@ struct BikeState {
   uint8_t errorFlags        = ERR_NONE;
   bool    lowVoltageWarning = false;
 
+  // AUX manual toggle (for AUX mode 2 = manual)
+  bool aux1ManualOn     = false;
+  bool aux2ManualOn     = false;
+
   // BLE
   bool bleConnected = false;
 };

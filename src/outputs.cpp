@@ -27,12 +27,15 @@ void outputsInitEarly() {
 // ============================================================================
 
 void outputsInitPWM() {
-  // Brake light PWM (for BRAKE_FADE mode)
+  // Brake light PWM (for BRAKE_FADE mode + rear light dimming)
   ledcSetup(PWM_CHANNEL_BRAKE, PWM_FREQ_HZ, PWM_RESOLUTION_BITS);
-  // Note: we attach/detach dynamically when fade mode is active
 
   // Position light PWM
   ledcSetup(PWM_CHANNEL_POSITION, PWM_FREQ_HZ, PWM_RESOLUTION_BITS);
+
+  // Turn signal PWM (for mo.wave sequential animation)
+  ledcSetup(PWM_CHANNEL_TURNL, PWM_FREQ_HZ, PWM_RESOLUTION_BITS);
+  ledcSetup(PWM_CHANNEL_TURNR, PWM_FREQ_HZ, PWM_RESOLUTION_BITS);
 }
 
 // ============================================================================
@@ -66,6 +69,10 @@ void outputPWM(int pin, uint8_t duty) {
     channel = PWM_CHANNEL_BRAKE;
   } else if (pin == PIN_LIGHT_OUT) {
     channel = PWM_CHANNEL_POSITION;
+  } else if (pin == PIN_TURNL_OUT) {
+    channel = PWM_CHANNEL_TURNL;
+  } else if (pin == PIN_TURNR_OUT) {
+    channel = PWM_CHANNEL_TURNR;
   } else {
     // Unsupported pin for PWM – fall back to on/off
     if (duty > 127) outputOn(pin);

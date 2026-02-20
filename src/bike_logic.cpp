@@ -289,9 +289,21 @@ void updateTurnSignals() {
 
 void updateLights() {
   if (!bike.ignitionOn) {
-    outputOff(PIN_LIGHT_OUT);
+    // Parking light is handled separately by updateParkingLight()
+    // Only turn off if parking light is not active
+    if (settings.parkingLightMode == 0 || bike.alarmTriggered) {
+      outputOff(PIN_LIGHT_OUT);
+    }
     outputOff(PIN_HIBEAM_OUT);
     return;
+  }
+
+  // Low beam mode:
+  //   0 = auto on after engine start (default, handled in handleStart)
+  //   1 = always on with ignition
+  //   2 = manual only (user toggles)
+  if (settings.lowBeamMode == 1 && !bike.lowBeamOn) {
+    bike.lowBeamOn = true;
   }
 
   // Position light dimming (PWM)
@@ -312,9 +324,25 @@ void updateLights() {
 // FIX #7: Real PWM fade for BRAKE_FADE mode
 // --------------------------------------------------------------------------
 
+// --------------------------------------------------------------------------
+// Rear light modes (rearLightMode):
+//   0 = Standard (brake only)
+//   1 = Dimmed tail light (PWM ~30%) + full brightness on brake
+//   2 = Always on (full) + still brightens on brake (handled by wiring)
+// --------------------------------------------------------------------------
+
 void updateBrakeLight() {
   if (!bike.brakePressed) {
-    outputOff(PIN_BRAKE_OUT);
+    // When not braking, check rear light mode for tail light behavior
+    if (bike.ignitionOn && settings.rearLightMode == 1) {
+      // Dimmed tail light (~30% brightness)
+      outputPWM(PIN_BRAKE_OUT, 77);  // ~30% of 255
+    } else if (bike.ignitionOn && settings.rearLightMode == 2) {
+      // Always on at full brightness
+      outputOn(PIN_BRAKE_OUT);
+    } else {
+      outputOff(PIN_BRAKE_OUT);
+    }
     bike.brakeFlashState = false;
     if (bike.emergencyHazardActive) {
       bike.emergencyHazardActive = false;
@@ -432,17 +460,165 @@ void updateStarter() {
 }
 
 // --------------------------------------------------------------------------
+// AUX Output Modes:
+//   0 = ON with ignition (default)
+//   1 = ON with engine running
+//   2 = Manual toggle (on/off via web UI)
+//   3 = Disabled (always off)
+// --------------------------------------------------------------------------
+
+static bool auxShouldBeOn(uint8_t mode, bool manualOn) {
+  switch (mode) {
+    case 0:  return bike.ignitionOn;
+    case 1:  return bike.engineRunning;
+    case 2:  return manualOn && bike.ignitionOn;
+    case 3:  return false;
+    default: return false;
+  }
+}
 
 void updateAuxOutputs() {
-  if (settings.aux1Mode == 0 && bike.ignitionOn) {
+  if (auxShouldBeOn(settings.aux1Mode, bike.aux1ManualOn)) {
     outputOn(PIN_AUX1_OUT);
   } else {
     outputOff(PIN_AUX1_OUT);
   }
 
-  if (settings.aux2Mode == 0 && bike.ignitionOn) {
+  if (auxShouldBeOn(settings.aux2Mode, bike.aux2ManualOn)) {
     outputOn(PIN_AUX2_OUT);
   } else {
     outputOff(PIN_AUX2_OUT);
+  }
+}
+
+// --------------------------------------------------------------------------
+// PARKING LIGHT
+// When ignition is off, show parking light based on parkingLightMode:
+//   0 = Off
+//   1 = Position light (low beam dimmed)
+//   2 = Left turn indicator steady
+//   3 = Right turn indicator steady
+// --------------------------------------------------------------------------
+
+void updateParkingLight() {
+  // Only active when ignition is OFF
+  if (bike.ignitionOn) return;
+
+  switch (settings.parkingLightMode) {
+    case 1: {
+      // Dim position light (~25%)
+      uint8_t duty = 64;
+      outputPWM(PIN_LIGHT_OUT, duty);
+      break;
+    }
+    case 2:
+      outputOn(PIN_TURNL_OUT);
+      break;
+    case 3:
+      outputOn(PIN_TURNR_OUT);
+      break;
+    default:
+      // Mode 0: nothing (outputs already off from safety)
+      break;
+  }
+}
+
+// --------------------------------------------------------------------------
+// ALARM SYSTEM
+// State machine:
+//   DISARMED → (ignition off for 30s) → ARMED
+//   ARMED → (vibration detected) → TRIGGERED (horn + lights for 30s)
+//   TRIGGERED → (30s elapsed) → ARMED (re-arm)
+//   Any state → (ignition on) → DISARMED
+// --------------------------------------------------------------------------
+
+void updateAlarm() {
+  if (settings.alarmMode == 0) {
+    bike.alarmArmed     = false;
+    bike.alarmTriggered = false;
+    return;
+  }
+
+  unsigned long now = millis();
+
+  // Ignition turns off alarm
+  if (bike.ignitionOn) {
+    bike.alarmArmed     = false;
+    bike.alarmTriggered = false;
+    bike.alarmTriggerTime = 0;
+    return;
+  }
+
+  // Alarm triggered → sound horn + flash lights for ALARM_DURATION_MS
+  if (bike.alarmTriggered) {
+    unsigned long elapsed = now - bike.alarmTriggerTime;
+
+    if (elapsed >= ALARM_DURATION_MS) {
+      // Stop alarm, re-arm
+      bike.alarmTriggered = false;
+      outputOff(PIN_HORN_OUT);
+      outputOff(PIN_TURNL_OUT);
+      outputOff(PIN_TURNR_OUT);
+      LOG_I("Alarm: timeout – re-armed");
+      return;
+    }
+
+    // Flash turn signals + horn during alarm
+    bool flashState = ((now / 200) % 2) == 0;  // 5Hz flash
+    if (flashState) {
+      outputOn(PIN_TURNL_OUT);
+      outputOn(PIN_TURNR_OUT);
+      outputOn(PIN_HORN_OUT);
+    } else {
+      outputOff(PIN_TURNL_OUT);
+      outputOff(PIN_TURNR_OUT);
+      outputOff(PIN_HORN_OUT);
+    }
+    return;
+  }
+
+  // Not yet armed → wait for arm delay after ignition off
+  if (!bike.alarmArmed) {
+    // alarmTriggerTime doubles as arm-delay start when not triggered
+    if (bike.alarmTriggerTime == 0) {
+      bike.alarmTriggerTime = now;  // Start counting from now
+    }
+    if (now - bike.alarmTriggerTime >= ALARM_ARM_DELAY_MS) {
+      bike.alarmArmed = true;
+      bike.alarmTriggerTime = 0;
+      LOG_I("Alarm: armed");
+    }
+    return;
+  }
+
+  // Armed → check vibration sensor
+  if (now - bike.lastAlarmCheck >= ALARM_VIBRATION_DEBOUNCE_MS) {
+    bike.lastAlarmCheck = now;
+
+    bool vibration = inputActive(PIN_VIBRATION);
+    if (vibration) {
+      // Count hits within window using static counters
+      static uint8_t hitCount = 0;
+      static unsigned long firstHitTime = 0;
+
+      if (hitCount == 0) {
+        firstHitTime = now;
+      }
+
+      hitCount++;
+
+      // Check if we exceeded the window
+      if (now - firstHitTime > ALARM_TRIGGER_WINDOW_MS) {
+        hitCount = 1;
+        firstHitTime = now;
+      }
+
+      if (hitCount >= ALARM_TRIGGER_THRESHOLD) {
+        bike.alarmTriggered  = true;
+        bike.alarmTriggerTime = now;
+        hitCount = 0;
+        LOG_W("Alarm: TRIGGERED!");
+      }
+    }
   }
 }

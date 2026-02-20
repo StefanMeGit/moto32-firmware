@@ -4,12 +4,24 @@
 #include <esp_task_wdt.h>
 
 // ============================================================================
-// WATCHDOG (FIX #2)
+// WATCHDOG (FIX #2) – uses new esp_task_wdt_config_t API (ESP-IDF ≥5.x)
 // ============================================================================
 
 void safetyInitWatchdog() {
-  esp_task_wdt_init(WATCHDOG_TIMEOUT_S, true);  // true = panic on timeout → restart
-  esp_task_wdt_add(NULL);                        // Add current task (loopTask)
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+  // New ESP-IDF v5.x API
+  esp_task_wdt_config_t wdtConfig = {
+    .timeout_ms     = WATCHDOG_TIMEOUT_S * 1000,
+    .idle_core_mask = 0,          // Don't watch idle tasks
+    .trigger_panic  = true        // Panic on timeout → restart
+  };
+  esp_task_wdt_reconfigure(&wdtConfig);
+  esp_task_wdt_add(NULL);         // Add current task (loopTask)
+#else
+  // Legacy ESP-IDF v4.x API
+  esp_task_wdt_init(WATCHDOG_TIMEOUT_S, true);
+  esp_task_wdt_add(NULL);
+#endif
   LOG_I("Watchdog initialized (%ds)", WATCHDOG_TIMEOUT_S);
 }
 
