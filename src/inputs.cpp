@@ -4,7 +4,7 @@
 // DEBOUNCED INPUT
 // ============================================================================
 
-// ESP32-S3 max GPIO number is 48 → MAX_PIN defined in config.h
+// ESP32 max GPIO number is 39 → MAX_PIN defined in config.h
 
 static bool db_initialized[MAX_PIN] = {};
 static bool db_stableState[MAX_PIN] = {};
