@@ -67,8 +67,17 @@ float safetyGetVoltage() {
 void safetyCheckVoltage() {
   float v = bike.batteryVoltage;
 
+  // USB-only bench mode / disconnected battery sense wire:
+  // ignore implausible VBAT values to avoid false low-voltage shutdown.
+  if (v < VBAT_PRESENT_MIN_VOLTAGE) {
+    bike.lowVoltageWarning = false;
+    bike.errorFlags &= ~ERR_LOW_VOLTAGE;
+    bike.errorFlags &= ~ERR_HIGH_VOLTAGE;
+    return;
+  }
+
   // Low voltage
-  if (v < VBAT_CRITICAL_LOW && v > 1.0f) {  // > 1V to ignore disconnected ADC
+  if (v < VBAT_CRITICAL_LOW) {
     bike.errorFlags |= ERR_LOW_VOLTAGE;
     bike.lowVoltageWarning = true;
     LOG_W("CRITICAL: Battery voltage %.1fV – shutting down non-essential", v);
@@ -76,7 +85,7 @@ void safetyCheckVoltage() {
     outputOff(PIN_AUX1_OUT);
     outputOff(PIN_AUX2_OUT);
     outputOff(PIN_HORN_OUT);
-  } else if (v < VBAT_WARNING_LOW && v > 1.0f) {
+  } else if (v < VBAT_WARNING_LOW) {
     bike.lowVoltageWarning = true;
     if (!(bike.errorFlags & ERR_LOW_VOLTAGE)) {
       LOG_W("Battery voltage low: %.1fV", v);
