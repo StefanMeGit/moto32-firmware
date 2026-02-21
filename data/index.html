@@ -489,7 +489,7 @@ select option{background:var(--panel);color:var(--text)}
     <div class="home-summary">
       <div class="home-stat">
         <div class="k"><span class="icon">&#9889;</span><span data-i18n="home_voltage"></span></div>
-        <div class="v" id="homeVoltage">--.- V</div>
+        <div class="v" id="homeVoltage">N/A</div>
       </div>
       <div class="home-stat">
         <div class="k"><span class="icon">&#128273;</span><span data-i18n="home_ignition"></span></div>
@@ -514,7 +514,7 @@ select option{background:var(--panel);color:var(--text)}
     <div class="grid3" style="margin-bottom:12px">
       <div>
         <div style="font-size:.72rem;color:var(--muted);margin-bottom:4px" data-i18n="lbl_voltage"></div>
-        <div id="batVolt" style="font-family:'JetBrains Mono',monospace;font-size:1.6rem;font-weight:700;color:var(--accent)">--.- V</div>
+        <div id="batVolt" style="font-family:'JetBrains Mono',monospace;font-size:1.6rem;font-weight:700;color:var(--accent)">N/A</div>
       </div>
       <div>
         <div style="font-size:.72rem;color:var(--muted);margin-bottom:4px" data-i18n="lbl_status"></div>
@@ -908,7 +908,7 @@ select option{background:var(--panel);color:var(--text)}
 </div>
 
 <div class="footer">
-  MOTO32 OPEN SOURCE &middot; ESP32-WROOM-32D &middot; MIT LICENSE &middot;
+  MOTO32 OPEN SOURCE &middot; ESP32-S3 N16R8 &middot; MIT LICENSE &middot;
   <a href="https://github.com/StefanMeGit/moto32-firmware/" target="_blank" rel="noopener noreferrer">GitHub Repo</a>
 </div>
 
@@ -962,6 +962,7 @@ const LANG = {
     home_ble_not_detected: 'Not detected',
     state_on: 'ON',
     state_off: 'OFF',
+    val_na: 'N/A',
 
     // Diagnostics
     card_battery: 'Battery & System',
@@ -988,6 +989,7 @@ const LANG = {
     err_starter_timeout: 'Starter Timeout',
     err_watchdog: 'Watchdog Reset',
     err_sidestand: 'Sidestand',
+    err_input_implausible: 'Input Plausibility',
 
     // I/O labels
     io_active: 'Active',
@@ -1279,6 +1281,7 @@ const LANG = {
     home_ble_not_detected: 'Nicht erkannt',
     state_on: 'AN',
     state_off: 'AUS',
+    val_na: 'N/A',
 
     card_battery: 'Batterie & System',
     lbl_voltage: 'Spannung',
@@ -1302,6 +1305,7 @@ const LANG = {
     err_starter_timeout: 'Starter Timeout',
     err_watchdog: 'Watchdog Reset',
     err_sidestand: 'Seitenst\u00e4nder',
+    err_input_implausible: 'Eingangs-Plausibilit\u00e4t',
 
     io_active: 'Aktiv',
     io_inactive: 'Inaktiv',
@@ -1673,9 +1677,9 @@ function populateSelects() {
 // CONFIG
 // ═══════════════════════════════════════════════════════
 
-const INPUT_PINS = {lock:46,turnL:47,turnR:48,light:21,start:22,horn:23,brake:1,kill:2,stand:3,aux1:4,aux2:5,speed:6};
+const INPUT_PINS = {lock:14,turnL:15,turnR:16,light:17,start:18,horn:21,brake:38,kill:39,stand:40,aux1:41,aux2:42,speed:47};
 const INPUT_IDS = ['lock','turnL','turnR','light','start','horn','brake','kill','stand','aux1','aux2','speed'];
-const OUTPUT_PINS = {turnLOut:9,turnROut:10,lightOut:11,hibeam:12,brakeOut:13,hornOut:41,start1:44,start2:45,ignOut:42,aux1Out:43,aux2Out:40};
+const OUTPUT_PINS = {turnLOut:2,turnROut:4,lightOut:5,hibeam:6,brakeOut:7,hornOut:8,start1:9,start2:10,ignOut:11,aux1Out:12,aux2Out:13};
 const OUTPUT_IDS = ['turnLOut','turnROut','lightOut','hibeam','brakeOut','hornOut','start1','start2','ignOut','aux1Out','aux2Out'];
 
 // ─── State ───
@@ -1841,8 +1845,11 @@ function updateHomeOverview(){
   if ($('homeFirmware')) $('homeFirmware').textContent = firmwareVersion || '--';
   if ($('homeMode')) $('homeMode').textContent = advancedMode ? t('mode_advanced') : t('mode_basic');
   if ($('homeVoltage')) {
-    const v = Number(diag.voltage || 0);
-    $('homeVoltage').textContent = `${v.toFixed(1)} V`;
+    const hasVoltage = !!diag.voltageAvailable;
+    const v = Number(diag.voltage);
+    $('homeVoltage').textContent = (hasVoltage && Number.isFinite(v))
+        ? `${v.toFixed(1)} V`
+        : t('val_na');
   }
   if ($('homeIgnition')) $('homeIgnition').textContent = diag.ignitionOn ? t('state_on') : t('state_off');
   if ($('homeEngine')) {
@@ -2161,8 +2168,11 @@ function updateDiag(s){
   }
 
   // Battery
-  const v = s.voltage || 0;
-  $('batVolt').textContent = v.toFixed(1) + ' V';
+  const hasVoltage = !!s.voltageAvailable;
+  const v = Number(s.voltage);
+  $('batVolt').textContent = (hasVoltage && Number.isFinite(v))
+      ? (v.toFixed(1) + ' V')
+      : t('val_na');
 
   // Engine
   const eng = $('engineState');
@@ -2180,6 +2190,7 @@ function updateDiag(s){
   if(ef&4)  errs.push('<span class="err-chip warn">'+t('err_starter_timeout')+'</span>');
   if(ef&8)  errs.push('<span class="err-chip warn">'+t('err_watchdog')+'</span>');
   if(ef&16) errs.push('<span class="err-chip warn">'+t('err_sidestand')+'</span>');
+  if(ef&32) errs.push('<span class="err-chip warn">'+t('err_input_implausible')+'</span>');
   $('errChips').innerHTML = errs.join('');
 
   // Inputs

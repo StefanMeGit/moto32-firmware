@@ -14,6 +14,9 @@ Settings bleGetNewSettings();
 // Run keyless proximity scan & state machine (call every loop)
 void bleKeylessUpdate();
 
+// Suspend or resume automatic keyless background scans.
+void bleKeylessSetAutoScanSuspended(bool suspended);
+
 // Returns true if keyless grants ignition permission
 bool bleKeylessIgnitionAllowed();
 

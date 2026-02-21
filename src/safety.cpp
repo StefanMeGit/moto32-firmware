@@ -1,5 +1,4 @@
 #include "safety.h"
-#include "outputs.h"
 #include "inputs.h"
 #include <esp_task_wdt.h>
 
@@ -30,34 +29,13 @@ void safetyFeedWatchdog() {
 }
 
 // ============================================================================
-// BATTERY VOLTAGE MONITORING (FIX #10)
+// BATTERY / VOLTAGE LOGIC
+// Disabled by request for USB-only operation (no shutdowns/warnings).
 // ============================================================================
 
-static float voltageBuffer[VBAT_FILTER_SAMPLES] = {};
-static int   voltageIndex = 0;
-static bool  voltageBufferFull = false;
-static unsigned long lastVoltageRead = 0;
-
 void safetyUpdateVoltage() {
-  unsigned long now = millis();
-  if (now - lastVoltageRead < VBAT_SAMPLE_INTERVAL_MS) return;
-  lastVoltageRead = now;
-
-  int raw = analogRead(PIN_VBAT_ADC);
-  float voltage = (raw / 4095.0f) * 3.3f * VBAT_DIVIDER_RATIO;
-
-  voltageBuffer[voltageIndex] = voltage;
-  voltageIndex = (voltageIndex + 1) % VBAT_FILTER_SAMPLES;
-  if (voltageIndex == 0) voltageBufferFull = true;
-
-  // Calculate moving average
-  int count = voltageBufferFull ? VBAT_FILTER_SAMPLES : voltageIndex;
-  if (count == 0) count = 1;
-  float sum = 0;
-  for (int i = 0; i < count; i++) {
-    sum += voltageBuffer[i];
-  }
-  bike.batteryVoltage = sum / count;
+  bike.batteryVoltage = 0.0f;
+  bike.batteryVoltageAvailable = false;
 }
 
 float safetyGetVoltage() {
@@ -65,53 +43,14 @@ float safetyGetVoltage() {
 }
 
 bool safetyIsCriticalLowVoltage() {
-  float v = bike.batteryVoltage;
-  if (v < VBAT_PRESENT_MIN_VOLTAGE) return false;
-  return v < VBAT_CRITICAL_LOW;
+  return false;
 }
 
 void safetyCheckVoltage() {
-  float v = bike.batteryVoltage;
-
-  // USB-only bench mode / disconnected battery sense wire:
-  // ignore implausible VBAT values to avoid false low-voltage shutdown.
-  if (v < VBAT_PRESENT_MIN_VOLTAGE) {
-    bike.lowVoltageWarning = false;
-    bike.errorFlags &= ~ERR_LOW_VOLTAGE;
-    bike.errorFlags &= ~ERR_HIGH_VOLTAGE;
-    return;
-  }
-
-  // Low voltage
-  if (safetyIsCriticalLowVoltage()) {
-    bike.errorFlags |= ERR_LOW_VOLTAGE;
-    bike.lowVoltageWarning = true;
-    LOG_W("CRITICAL: Battery voltage %.1fV – shutting down non-essential", v);
-    // Turn off non-essential outputs
-    outputOff(PIN_AUX1_OUT);
-    outputOff(PIN_AUX2_OUT);
-    outputOff(PIN_HORN_OUT);
-  } else if (v < VBAT_WARNING_LOW) {
-    bike.lowVoltageWarning = true;
-    if (!(bike.errorFlags & ERR_LOW_VOLTAGE)) {
-      LOG_W("Battery voltage low: %.1fV", v);
-    }
-  } else {
-    bike.lowVoltageWarning = false;
-    bike.errorFlags &= ~ERR_LOW_VOLTAGE;
-  }
-
-  // High voltage
-  if (v > VBAT_CRITICAL_HIGH) {
-    bike.errorFlags |= ERR_HIGH_VOLTAGE;
-    LOG_E("CRITICAL: Overvoltage %.1fV!", v);
-  } else if (v > VBAT_WARNING_HIGH) {
-    if (!(bike.errorFlags & ERR_HIGH_VOLTAGE)) {
-      LOG_W("Battery voltage high: %.1fV", v);
-    }
-  } else {
-    bike.errorFlags &= ~ERR_HIGH_VOLTAGE;
-  }
+  bike.batteryVoltageAvailable = false;
+  bike.lowVoltageWarning = false;
+  bike.errorFlags &= ~ERR_LOW_VOLTAGE;
+  bike.errorFlags &= ~ERR_HIGH_VOLTAGE;
 }
 
 // ============================================================================
@@ -174,6 +113,108 @@ static void handleKillSwitch() {
 
 void resolveHazardState() {
   bike.hazardLightsOn = bike.emergencyHazardActive || bike.manualHazardRequested;
+}
+
+// ============================================================================
+// INPUT PLAUSIBILITY CHECKS
+// ============================================================================
+
+static bool heldLongerThan(bool active,
+                           unsigned long& activeSince,
+                           unsigned long now,
+                           unsigned long thresholdMs) {
+  if (!active) {
+    activeSince = 0;
+    return false;
+  }
+  if (activeSince == 0) activeSince = now;
+  return (now - activeSince) >= thresholdMs;
+}
+
+void safetyRunInputPlausibilityChecks() {
+  static unsigned long startHeldSince = 0;
+  static unsigned long lightHeldSince = 0;
+  static unsigned long hornHeldSince = 0;
+  static unsigned long turnLeftHeldSince = 0;
+  static unsigned long turnRightHeldSince = 0;
+  static unsigned long dualTurnHeldSince = 0;
+  static unsigned long speedOffWindowStart = 0;
+  static unsigned long speedOffPulseStart = 0;
+  static unsigned long lastSpeedPulseCount = 0;
+  static uint8_t activeFaultMask = 0;
+
+  const unsigned long now = millis();
+  uint8_t faultMask = 0;
+
+  const bool stuckStart = heldLongerThan(
+      startEvent.state, startHeldSince, now, INPUT_STUCK_ACTIVE_MS);
+  const bool stuckLight = heldLongerThan(
+      lightEvent.state, lightHeldSince, now, INPUT_STUCK_ACTIVE_MS);
+  const bool stuckHorn = heldLongerThan(
+      hornEvent.state, hornHeldSince, now, INPUT_STUCK_ACTIVE_MS);
+  const bool stuckTurnL = heldLongerThan(
+      turnLeftEvent.state, turnLeftHeldSince, now, INPUT_STUCK_ACTIVE_MS);
+  const bool stuckTurnR = heldLongerThan(
+      turnRightEvent.state, turnRightHeldSince, now, INPUT_STUCK_ACTIVE_MS);
+
+  if (turnLeftEvent.state && turnRightEvent.state && !bike.hazardLightsOn) {
+    if (dualTurnHeldSince == 0) dualTurnHeldSince = now;
+  } else {
+    dualTurnHeldSince = 0;
+  }
+  const bool dualTurnStuck = dualTurnHeldSince != 0
+      && (now - dualTurnHeldSince >= INPUT_DUAL_TURN_STUCK_MS);
+
+  bool speedPulsesWhileIgnOff = false;
+  if (!bike.ignitionOn) {
+    if (bike.speedPulseCount != lastSpeedPulseCount) {
+      if (speedOffWindowStart == 0) {
+        speedOffWindowStart = now;
+        speedOffPulseStart = lastSpeedPulseCount;
+      }
+    }
+    if (speedOffWindowStart != 0) {
+      const unsigned long pulseDelta = bike.speedPulseCount - speedOffPulseStart;
+      if (pulseDelta >= INPUT_SPEED_OFF_PULSE_THRESHOLD
+          && (now - speedOffWindowStart) <= INPUT_SPEED_OFF_PULSE_WINDOW_MS) {
+        speedPulsesWhileIgnOff = true;
+      } else if ((now - speedOffWindowStart) > INPUT_SPEED_OFF_PULSE_WINDOW_MS) {
+        speedOffWindowStart = 0;
+        speedOffPulseStart = bike.speedPulseCount;
+      }
+    }
+  } else {
+    speedOffWindowStart = 0;
+    speedOffPulseStart = bike.speedPulseCount;
+  }
+  lastSpeedPulseCount = bike.speedPulseCount;
+
+  if (stuckStart) faultMask |= 0x01;
+  if (stuckLight) faultMask |= 0x02;
+  if (stuckHorn) faultMask |= 0x04;
+  if (stuckTurnL) faultMask |= 0x08;
+  if (stuckTurnR) faultMask |= 0x10;
+  if (dualTurnStuck) faultMask |= 0x20;
+  if (speedPulsesWhileIgnOff) faultMask |= 0x40;
+
+  const uint8_t newFaults = faultMask & ~activeFaultMask;
+  if (newFaults) {
+    LOG_W("Input plausibility warning (mask=0x%02X)", newFaults);
+  }
+  if (activeFaultMask && !faultMask) {
+    LOG_I("Input plausibility restored");
+  }
+  activeFaultMask = faultMask;
+
+  if (faultMask) {
+    bike.errorFlags |= ERR_INPUT_IMPLAUSIBLE;
+    if (stuckStart && bike.starterEngaged) {
+      bike.starterEngaged = false;
+      LOG_W("Starter disengaged due to stuck START input");
+    }
+  } else {
+    bike.errorFlags &= ~ERR_INPUT_IMPLAUSIBLE;
+  }
 }
 
 // ============================================================================

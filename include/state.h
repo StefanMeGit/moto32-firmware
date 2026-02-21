@@ -115,7 +115,8 @@ struct BikeState {
   bool             calibrationStepOutputOn = false;
 
   // Battery
-  float   batteryVoltage    = 12.6f;
+  float   batteryVoltage    = 0.0f;
+  bool    batteryVoltageAvailable = false;
   uint8_t errorFlags        = ERR_NONE;
   bool    lowVoltageWarning = false;
 
@@ -125,6 +126,12 @@ struct BikeState {
 
   // BLE
   bool bleConnected = false;
+
+  // Runtime diagnostics
+  bool    safeModeActive = false;
+  uint8_t bootLoopCounter = 0;
+  uint8_t resetReasonCode = 0;
+  bool    coreDumpPartitionFound = false;
 };
 
 // ============================================================================

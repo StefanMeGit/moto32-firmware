@@ -6,7 +6,7 @@ static uint8_t pinToChannel[MAX_PIN] = {};
 
 // ============================================================================
 // CRITICAL: Early init – called FIRST in setup(), before Serial, before anything
-// This prevents MOSFET outputs from floating HIGH during ESP32-WROOM-32D boot.
+// This prevents MOSFET outputs from floating HIGH during ESP32 boot.
 // Strapping pins can glitch at boot – keep outputs forced OFF during early init.
 // ============================================================================
 

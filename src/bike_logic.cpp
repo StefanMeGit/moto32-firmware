@@ -484,11 +484,6 @@ void updateBrakeLight() {
 // --------------------------------------------------------------------------
 
 void updateHorn() {
-  if (safetyIsCriticalLowVoltage()) {
-    outputOff(PIN_HORN_OUT);
-    return;
-  }
-
   if (bike.hornPressed && bike.ignitionOn) {
     outputOn(PIN_HORN_OUT);
   } else {
@@ -529,12 +524,6 @@ static bool auxShouldBeOn(uint8_t mode, bool manualOn) {
 }
 
 void updateAuxOutputs() {
-  if (safetyIsCriticalLowVoltage()) {
-    outputOff(PIN_AUX1_OUT);
-    outputOff(PIN_AUX2_OUT);
-    return;
-  }
-
   const bool aux1On = auxShouldBeOn(settings.aux1Mode, bike.aux1ManualOn);
   const bool aux2On = auxShouldBeOn(settings.aux2Mode, bike.aux2ManualOn);
   const bool drlAux1 = bike.ignitionOn && !bike.starterEngaged

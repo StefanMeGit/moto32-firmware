@@ -36,6 +36,22 @@ enum LogLevel : uint8_t {
 // ============================================================================
 // PIN DEFINITIONS – INPUTS (active LOW unless noted)
 // ============================================================================
+#if CONFIG_IDF_TARGET_ESP32S3
+// ESP32-S3 default mapping for Moto32 (N16R8 target).
+// Avoids module-reserved flash/PSRAM pins (GPIO26-37) and USB D-/D+ (GPIO19/20).
+#define PIN_LOCK       14    // Ignition lock (active HIGH – connects to +12V)
+#define PIN_TURNL      15    // Turn left
+#define PIN_TURNR      16    // Turn right
+#define PIN_LIGHT      17    // Light control
+#define PIN_START      18    // Starter button
+#define PIN_HORN       21    // Horn button
+#define PIN_BRAKE      38    // Brake switch (front/rear parallel)
+#define PIN_KILL       39    // Kill switch
+#define PIN_STAND      40    // Side stand switch
+#define PIN_AUX1       41    // Auxiliary input 1
+#define PIN_AUX2       42    // Auxiliary input 2
+#define PIN_SPEED      47    // Speed sensor (pulse input)
+#else
 #define PIN_LOCK       39    // Ignition lock (active HIGH – connects to +12V)
 #define PIN_TURNL      36    // Turn left
 #define PIN_TURNR      34    // Turn right
@@ -48,10 +64,24 @@ enum LogLevel : uint8_t {
 #define PIN_AUX1       12    // Auxiliary input 1
 #define PIN_AUX2       13    // Auxiliary input 2
 #define PIN_SPEED      23    // Speed sensor (pulse input)
+#endif
 
 // ============================================================================
 // PIN DEFINITIONS – OUTPUTS (HIGH = on, MOSFET switches +12V)
 // ============================================================================
+#if CONFIG_IDF_TARGET_ESP32S3
+#define PIN_TURNL_OUT    2   // Left turn indicator
+#define PIN_TURNR_OUT    4   // Right turn indicator
+#define PIN_LIGHT_OUT    5   // Low beam
+#define PIN_HIBEAM_OUT   6   // High beam
+#define PIN_BRAKE_OUT    7   // Brake light
+#define PIN_HORN_OUT     8   // Horn relay
+#define PIN_START_OUT1   9   // Starter output 1 (2 wires for 30A)
+#define PIN_START_OUT2  10   // Starter output 2
+#define PIN_IGN_OUT     11   // Ignition system
+#define PIN_AUX1_OUT    12   // Auxiliary output 1
+#define PIN_AUX2_OUT    13   // Auxiliary output 2
+#else
 #define PIN_TURNL_OUT   22   // Left turn indicator
 #define PIN_TURNR_OUT   21   // Right turn indicator
 #define PIN_LIGHT_OUT   19   // Low beam
@@ -63,15 +93,28 @@ enum LogLevel : uint8_t {
 #define PIN_IGN_OUT      2   // Ignition system
 #define PIN_AUX1_OUT    15   // Auxiliary output 1
 #define PIN_AUX2_OUT     0   // Auxiliary output 2
+#endif
 
 // Status LED
+#if CONFIG_IDF_TARGET_ESP32S3
+#define LED_STATUS      48
+#else
 #define LED_STATUS       3
+#endif
 
-// ESP32 max GPIO index + 1 (GPIOs 0-39)
-#define MAX_PIN         40
+// Max GPIO index + 1 used by runtime pin-state arrays
+#if CONFIG_IDF_TARGET_ESP32S3
+#define MAX_PIN         49    // GPIO0-48
+#else
+#define MAX_PIN         40    // GPIO0-39
+#endif
 
 // Battery voltage ADC (needs external voltage divider 47k/10k)
+#if CONFIG_IDF_TARGET_ESP32S3
+#define PIN_VBAT_ADC     1
+#else
 #define PIN_VBAT_ADC    35
+#endif
 
 // Vibration/shock sensor for alarm (shares AUX2 input when alarm enabled)
 #define PIN_VIBRATION    PIN_AUX2
@@ -132,6 +175,12 @@ static const int CALIBRATION_PIN_COUNT = sizeof(CALIBRATION_PINS) / sizeof(CALIB
 // Watchdog
 #define WATCHDOG_TIMEOUT_S            8
 
+// Boot-loop safe mode
+#define SAFE_MODE_TRIGGER_RESTARTS        3
+#define SAFE_MODE_SHORT_UPTIME_MS     60000UL
+#define SAFE_MODE_RECOVERY_UPTIME_MS 180000UL
+#define SAFE_MODE_HEARTBEAT_MS         1000UL
+
 // Battery voltage thresholds
 #define VBAT_DIVIDER_RATIO        5.7f     // 47k + 10k voltage divider
 #define VBAT_PRESENT_MIN_VOLTAGE  6.0f     // Below this, treat VBAT input as disconnected/floating
@@ -159,6 +208,12 @@ static const int CALIBRATION_PIN_COUNT = sizeof(CALIBRATION_PINS) / sizeof(CALIB
 #define BLE_CHAR_SETTINGS_UUID "4d6f7432-0001-0003-0000-000000000000"
 #define BLE_CHAR_ERRORS_UUID   "4d6f7432-0001-0004-0000-000000000000"
 #define BLE_CHAR_COMMAND_UUID  "4d6f7432-0001-0005-0000-000000000000"
+
+// Input plausibility monitoring
+#define INPUT_STUCK_ACTIVE_MS             45000UL
+#define INPUT_DUAL_TURN_STUCK_MS           8000UL
+#define INPUT_SPEED_OFF_PULSE_WINDOW_MS    2500UL
+#define INPUT_SPEED_OFF_PULSE_THRESHOLD          6
 
 // ============================================================================
 // ENUMERATIONS
@@ -202,5 +257,6 @@ enum ErrorCode : uint8_t {
   ERR_HIGH_VOLTAGE    = 0x02,
   ERR_STARTER_TIMEOUT = 0x04,
   ERR_WATCHDOG_RESET  = 0x08,
-  ERR_STAND_KILL      = 0x10
+  ERR_STAND_KILL      = 0x10,
+  ERR_INPUT_IMPLAUSIBLE = 0x20
 };

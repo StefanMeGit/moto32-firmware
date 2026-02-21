@@ -2,7 +2,6 @@
   "name": "ESP32-S3-DevKitC-1 (4MB Flash)",
   "url": "https://www.espressif.com/en/products/devkits/esp32-s3-devkitc-1",
   "vendor": "Espressif",
-
   "build": {
     "core": "esp32",
     "mcu": "esp32s3",
@@ -15,19 +14,20 @@
       "partitions": "default_littlefs.csv"
     }
   },
-
-  "frameworks": ["arduino"],
-
-  "connectivity": ["wifi", "bluetooth"],
-
+  "frameworks": [
+    "arduino"
+  ],
+  "connectivity": [
+    "wifi",
+    "bluetooth"
+  ],
   "upload": {
     "flash_size": "4MB",
     "maximum_ram_size": 327680,
     "maximum_size": 4194304,
     "require_upload_port": true,
-    "speed": 115200
+    "speed": 460800
   },
-
   "debug": {
     "openocd_board": "esp32s3-builtin.cfg"
   }

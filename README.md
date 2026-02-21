@@ -1,7 +1,7 @@
 # Moto32 Firmware
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Platform: ESP32--WROOM--32D](https://img.shields.io/badge/Platform-ESP32--WROOM--32D-blue.svg)](https://www.espressif.com/)
+[![Platform: ESP32--S3--N16R8](https://img.shields.io/badge/Platform-ESP32--S3--N16R8-blue.svg)](https://www.espressif.com/)
 [![Build: PlatformIO](https://img.shields.io/badge/Build-PlatformIO-orange.svg)](https://platformio.org/)
 
 Open-source motorcycle control unit firmware for Moto32 hardware.  
@@ -275,40 +275,42 @@ Requests to these paths are redirected to `/`:
 
 ## Pin Mapping
 
+Default mapping for `ESP32-S3 N16R8` target.
+
 ### Inputs
 
 | Pin | Function | Type |
 |-----|----------|------|
-| 39 | Ignition lock | Active HIGH (12V) |
-| 36 | Turn left | Active LOW |
-| 34 | Turn right | Active LOW |
-| 32 | Light control | Active LOW |
-| 33 | Starter button | Active LOW |
-| 25 | Horn button | Active LOW |
-| 26 | Brake switch | Active LOW |
-| 27 | Kill switch | Active LOW |
-| 14 | Sidestand switch | Active LOW |
-| 12 | AUX input 1 | Active LOW |
-| 13 | AUX input 2 | Active LOW |
-| 23 | Speed sensor | Pulse input |
-| 35 | Battery voltage | ADC1 (with divider) |
+| 14 | Ignition lock | Active HIGH (12V) |
+| 15 | Turn left | Active LOW |
+| 16 | Turn right | Active LOW |
+| 17 | Light control | Active LOW |
+| 18 | Starter button | Active LOW |
+| 21 | Horn button | Active LOW |
+| 38 | Brake switch | Active LOW |
+| 39 | Kill switch | Active LOW |
+| 40 | Sidestand switch | Active LOW |
+| 41 | AUX input 1 | Active LOW |
+| 42 | AUX input 2 | Active LOW |
+| 47 | Speed sensor | Pulse input |
+| 1 | Battery voltage | ADC1 (with divider) |
 
 ### Outputs
 
 | Pin | Function | Notes |
 |-----|----------|-------|
-| 22 | Left turn | MOSFET, HIGH = on |
-| 21 | Right turn | MOSFET, HIGH = on |
-| 19 | Low beam | MOSFET + PWM |
-| 18 | High beam | MOSFET |
-| 17 | Brake light | MOSFET + PWM |
-| 16 | Horn relay | MOSFET |
-| 5 | Starter out 1 | MOSFET |
-| 4 | Starter out 2 | MOSFET |
-| 2 | Ignition out | MOSFET |
-| 15 | AUX out 1 | MOSFET |
-| 0 | AUX out 2 | MOSFET |
-| 3 | Status LED | GPIO |
+| 2 | Left turn | MOSFET, HIGH = on |
+| 4 | Right turn | MOSFET, HIGH = on |
+| 5 | Low beam | MOSFET + PWM |
+| 6 | High beam | MOSFET |
+| 7 | Brake light | MOSFET + PWM |
+| 8 | Horn relay | MOSFET |
+| 9 | Starter out 1 | MOSFET |
+| 10 | Starter out 2 | MOSFET |
+| 11 | Ignition out | MOSFET |
+| 12 | AUX out 1 | MOSFET |
+| 13 | AUX out 2 | MOSFET |
+| 48 | Status LED | GPIO |
 
 ---
 
@@ -318,7 +320,9 @@ Requests to these paths are redirected to `/`:
 
 - PlatformIO CLI or VS Code PlatformIO extension
 - USB serial adapter/cable
-- ESP32-WROOM-32D board profile (`esp32dev`)
+- Supported S3 board profiles:
+  - `esp32-s3-devkitc-1-n16r8` (16MB Flash, 8MB PSRAM)
+  - `esp32-s3-4mb` (ESP32-S3-DevKitC-1 4MB Flash)
 
 ### Install `pio` CLI (if missing)
 
@@ -333,13 +337,21 @@ Ensure your user bin path is in `PATH` (often `~/.local/bin`).
 ### Build
 
 ```bash
-pio run -e esp32-wroom-32d
+pio run -e esp32-s3-n16r8
+```
+
+```bash
+pio run -e esp32-s3-4mb
 ```
 
 ### Flash
 
 ```bash
-pio run -e esp32-wroom-32d -t upload --upload-port /dev/cu.usbserial-140
+pio run -e esp32-s3-n16r8 -t upload --upload-port /dev/cu.usbserial-140
+```
+
+```bash
+pio run -e esp32-s3-4mb -t upload --upload-port /dev/cu.usbserial-140
 ```
 
 ### Serial monitor
@@ -417,7 +429,7 @@ Device name: `Moto32`
 
 ## Partition Layout
 
-`partitions_ota.csv` currently uses:
+`partitions_ota.csv` (4MB targets) and `partitions_ota_16mb.csv` (N16R8 target) currently use:
 - `nvs` (settings/keyless storage)
 - `otadata`
 - `app0`, `app1` (OTA slots)
@@ -441,7 +453,7 @@ Device name: `Moto32`
 ### Serial logs show `Preferences begin(): NOT_FOUND`
 - This repository includes NVS recovery fallback.
 - If persistent issues continue, erase flash once and reflash:
-  - `pio run -e esp32-wroom-32d -t erase`
+  - `pio run -e <your-env> -t erase` (for example `esp32-s3-n16r8` or `esp32-s3-4mb`)
   - then upload firmware again.
 
 ### Upload error: `Could not exclusively lock port`
@@ -482,7 +494,9 @@ Device name: `Moto32`
 ├── data/
 │   └── index.html
 ├── boards/
+│   ├── esp32-s3-devkitc-1-n16r8.json
 │   └── esp32-s3-devkitc-1-4mb.json
+├── partitions_ota_16mb.csv
 ├── partitions_ota.csv
 ├── platformio.ini
 └── README.md

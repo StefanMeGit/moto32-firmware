@@ -101,6 +101,7 @@ static struct {
 
 static Preferences keylessPref;
 static const char* KEYLESS_NAMESPACE = "ble_kl";
+static bool keylessAutoScanSuspended = false;
 
 static int clampRssiLevel(int level) {
   return constrain(level, KEYLESS_RSSI_LEVEL_MIN, KEYLESS_RSSI_LEVEL_MAX);
@@ -185,6 +186,7 @@ static int sessionRemainingSeconds(unsigned long now) {
 
 static int nextAutoScanInSeconds(unsigned long now) {
   if (!keyless.enabled || keyless.pairedCount == 0) return -1;
+  if (keylessAutoScanSuspended) return -1;
   if (keyless.autoScanActive) return 0;
 
   const unsigned long intervalMs = keyless.ignitionGranted
@@ -833,10 +835,12 @@ void bleKeylessUpdate() {
 
   const unsigned long now = millis();
   const bool anyDetected = anyPairedDeviceInRange(now);
+  const bool autoScanAllowed = !keylessAutoScanSuspended;
 
   if (!keyless.ignitionGranted) {
     // Idle background scan while locked.
-    if (now - keyless.lastIdleScanTime >= KEYLESS_IDLE_SCAN_INTERVAL_MS) {
+    if (autoScanAllowed
+        && now - keyless.lastIdleScanTime >= KEYLESS_IDLE_SCAN_INTERVAL_MS) {
       keyless.lastIdleScanTime = now;
       tryStartAutoScan(KEYLESS_IDLE_SCAN_SECONDS, false, false);
     }
@@ -899,7 +903,8 @@ void bleKeylessUpdate() {
     return;
   }
 
-  if (now - keyless.lastRefreshScanTime >= KEYLESS_REFRESH_SCAN_INTERVAL_MS) {
+  if (autoScanAllowed
+      && now - keyless.lastRefreshScanTime >= KEYLESS_REFRESH_SCAN_INTERVAL_MS) {
     keyless.lastRefreshScanTime = now;
     if (tryStartAutoScan(KEYLESS_REFRESH_SCAN_SECONDS, true, false)) {
       LOG_D("Keyless: refresh scan started");
@@ -909,6 +914,24 @@ void bleKeylessUpdate() {
 
 bool bleKeylessIgnitionAllowed() {
   return keyless.ignitionGranted;
+}
+
+void bleKeylessSetAutoScanSuspended(bool suspended) {
+  if (keylessAutoScanSuspended == suspended) return;
+  keylessAutoScanSuspended = suspended;
+
+  if (suspended) {
+    if (keyless.pScan && keyless.pScan->isScanning() && !keyless.scanActive) {
+      keyless.pScan->stop();
+    }
+    keyless.autoScanActive = false;
+    keyless.sessionRefreshScan = false;
+    keyless.autoScanExtended = false;
+    keyless.statusDetected = false;
+    keyless.phoneDetected = false;
+  }
+
+  LOG_W("Keyless auto-scan %s", suspended ? "SUSPENDED" : "RESUMED");
 }
 
 bool bleKeylessTakeIgnitionOnRequest() {
@@ -1083,6 +1106,7 @@ void bleKeylessBuildJson(JsonDocument& doc) {
   doc["sessionRemaining"] = sessionRemainingSeconds(now);
   doc["nextScanIn"] = nextAutoScanInSeconds(now);
   doc["autoSearching"] = keyless.autoScanActive;
+  doc["autoScanSuspended"] = keylessAutoScanSuspended;
   doc["sessionRefreshSearching"] = keyless.autoScanActive && keyless.sessionRefreshScan;
   doc["phoneDetected"] = keyless.phoneDetected;
   doc["statusDetected"] = keyless.statusDetected;

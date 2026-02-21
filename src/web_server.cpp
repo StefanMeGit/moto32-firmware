@@ -11,29 +11,43 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include <Update.h>
+#include <esp_system.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <ctype.h>
 
 static AsyncWebServer  server(80);
 static AsyncWebSocket  ws("/ws");
-static const unsigned long BROADCAST_INTERVAL_MS = 150;
+static const unsigned long BROADCAST_INTERVAL_MS_DEFAULT = 200;
+static const unsigned long BROADCAST_INTERVAL_MS_REDUCED = 500;
 static const unsigned long STATE_KEEPALIVE_MS = 1000;
-static const unsigned long KEYLESS_CHECK_INTERVAL_MS = 1000;
-static const unsigned long KEYLESS_KEEPALIVE_MS = 5000;
+static const unsigned long KEYLESS_CHECK_INTERVAL_MS_DEFAULT = 1000;
+static const unsigned long KEYLESS_CHECK_INTERVAL_MS_REDUCED = 2500;
+static const unsigned long KEYLESS_KEEPALIVE_MS_DEFAULT = 5000;
+static const unsigned long KEYLESS_KEEPALIVE_MS_REDUCED = 10000;
+static const unsigned long WS_CLEANUP_INTERVAL_MS = 1000;
 static const unsigned long RESTART_DEFER_MS = 100;
 static unsigned long lastStateCheck = 0;
 static unsigned long lastStateBroadcast = 0;
 static unsigned long lastKeylessCheck = 0;
 static unsigned long lastKeylessBroadcast = 0;
+static unsigned long lastWsCleanup = 0;
+static unsigned long stateBroadcastIntervalMs = BROADCAST_INTERVAL_MS_DEFAULT;
+static unsigned long keylessCheckIntervalMs = KEYLESS_CHECK_INTERVAL_MS_DEFAULT;
+static unsigned long keylessKeepaliveMs = KEYLESS_KEEPALIVE_MS_DEFAULT;
 static String lastStatePayload;
 static String lastKeylessPayload;
 static bool restartPending = false;
 static unsigned long restartRequestedAt = 0;
+static unsigned long lastWsBackpressureLog = 0;
 
 // WiFi AP credentials
 static const char* AP_SSID = "Moto32";
 static const char* AP_PASS = "moto3232";  // min 8 chars
+static const uint8_t AP_CHANNEL = 6;
+static const uint8_t AP_MAX_CONNECTIONS = 4;
+static char activeApSsid[40] = {0};
+static bool activeApOpenFallback = false;
 
 struct ManualOutputOverride {
   const char* id;
@@ -140,10 +154,6 @@ static ManualInputOverride* findManualInputOverrideById(const char* id) {
   return nullptr;
 }
 
-static bool isVoltageProtectedManualPin(int pin) {
-  return pin == PIN_HORN_OUT || pin == PIN_AUX1_OUT || pin == PIN_AUX2_OUT;
-}
-
 static bool canKeepManualOverrideOn(const ManualOutputOverride& ovr, bool logReason) {
   if (!ovr.allowManualForce) {
     if (logReason) {
@@ -152,12 +162,6 @@ static bool canKeepManualOverrideOn(const ManualOutputOverride& ovr, bool logRea
     return false;
   }
   if (!bike.ignitionOn) return false;
-  if (isVoltageProtectedManualPin(ovr.pin) && safetyIsCriticalLowVoltage()) {
-    if (logReason) {
-      LOG_W("Manual override blocked by critical low voltage: %s", ovr.id);
-    }
-    return false;
-  }
   return true;
 }
 
@@ -173,6 +177,27 @@ static bool enqueueWsAction(const WebAction& action, const char* cmd) {
   }
   if (xQueueSend(wsActionQueue, &action, 0) != pdTRUE) {
     LOG_W("WS action queue full, dropped cmd=%s", cmd ? cmd : "?");
+    return false;
+  }
+  return true;
+}
+
+static bool wsReadyForBroadcast() {
+  if (ws.count() == 0) return false;
+  if (ws.availableForWriteAll()) return true;
+
+  const unsigned long now = millis();
+  if (now - lastWsBackpressureLog >= 2000) {
+    lastWsBackpressureLog = now;
+    LOG_W("WS backpressure: outbound queue is full, dropping frame");
+  }
+  return false;
+}
+
+static bool wsBroadcastText(const String& payload) {
+  if (!wsReadyForBroadcast()) return false;
+  const AsyncWebSocket::SendStatus status = ws.textAll(payload);
+  if (status == AsyncWebSocket::DISCARDED) {
     return false;
   }
   return true;
@@ -202,6 +227,32 @@ static bool profileReady(const Settings& s) {
       && hasVisibleChars(s.driverName);
 }
 
+static const char* resetReasonCodeToText(uint8_t code) {
+  switch (code) {
+    case ESP_RST_POWERON:   return "POWERON_RESET";
+    case ESP_RST_EXT:       return "EXT_RESET";
+    case ESP_RST_SW:        return "SW_RESET";
+    case ESP_RST_PANIC:     return "PANIC_RESET";
+    case ESP_RST_INT_WDT:   return "INT_WDT_RESET";
+    case ESP_RST_TASK_WDT:  return "TASK_WDT_RESET";
+    case ESP_RST_WDT:       return "WDT_RESET";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP_RESET";
+    case ESP_RST_BROWNOUT:  return "BROWNOUT_RESET";
+    case ESP_RST_SDIO:      return "SDIO_RESET";
+    default:                return "UNKNOWN_RESET";
+  }
+}
+
+static void makeApSsid(char* out, size_t outLen, bool openFallback) {
+  if (!out || outLen == 0) return;
+  uint16_t suffix = (uint16_t)(ESP.getEfuseMac() & 0xFFFF);
+  if (openFallback) {
+    snprintf(out, outLen, "%s-OPEN-%04X", AP_SSID, suffix);
+  } else {
+    snprintf(out, outLen, "%s-%04X", AP_SSID, suffix);
+  }
+}
+
 // ============================================================================
 // JSON STATE BUILDER
 // ============================================================================
@@ -209,6 +260,7 @@ static bool profileReady(const Settings& s) {
 static void buildStateJson(JsonDocument& doc) {
   doc["type"] = "state";
   doc["voltage"] = round(bike.batteryVoltage * 10.0f) / 10.0f;
+  doc["voltageAvailable"] = bike.batteryVoltageAvailable;
   doc["errorFlags"] = bike.errorFlags;
   doc["ignitionOn"] = bike.ignitionOn;
   doc["engineRunning"] = bike.engineRunning;
@@ -216,6 +268,10 @@ static void buildStateJson(JsonDocument& doc) {
   doc["killActive"] = bike.killActive;
   doc["bleConnected"] = bike.bleConnected;
   doc["speedPulses"] = bike.speedPulseCount;
+  doc["safeMode"] = bike.safeModeActive;
+  doc["bootLoopCounter"] = bike.bootLoopCounter;
+  doc["resetReasonCode"] = bike.resetReasonCode;
+  doc["coreDumpPartitionFound"] = bike.coreDumpPartitionFound;
   doc["turnCalActive"] = turnDistanceCalibrationActive;
   doc["turnCalPulses"] = turnDistanceCalibrationActive
       ? (bike.speedPulseCount - turnDistanceCalibrationStartPulses)
@@ -254,8 +310,7 @@ static void buildStateJson(JsonDocument& doc) {
   outs["lightOut"] = bike.lowBeamOn;
   outs["hibeam"]   = bike.highBeamOn;
   outs["brakeOut"] = bike.brakePressed;
-  outs["hornOut"]  = bike.hornPressed && bike.ignitionOn
-      && !safetyIsCriticalLowVoltage();
+  outs["hornOut"]  = bike.hornPressed && bike.ignitionOn;
   outs["start1"]   = bike.starterEngaged;
   outs["start2"]   = bike.starterEngaged;
   outs["ignOut"]   = bike.ignitionOn && !bike.killActive;
@@ -318,7 +373,7 @@ static void broadcastSettingsJson() {
   buildSettingsJson(doc);
   String out;
   serializeJson(doc, out);
-  ws.textAll(out);
+  wsBroadcastText(out);
 }
 
 static void processQueuedWsActions() {
@@ -402,6 +457,10 @@ static void processQueuedWsActions() {
         break;
 
       case WebActionType::TOGGLE_INPUT: {
+        if (bike.safeModeActive) {
+          LOG_W("Manual input override blocked in SAFE MODE");
+          break;
+        }
         ManualInputOverride* ovr = findManualInputOverrideById(action.inputId);
         if (ovr) {
           if (!ovr->enabled) {
@@ -435,6 +494,10 @@ static void processQueuedWsActions() {
       }
 
       case WebActionType::TOGGLE_OUTPUT: {
+        if (bike.safeModeActive) {
+          LOG_W("Manual output override blocked in SAFE MODE");
+          break;
+        }
         ManualOutputOverride* ovr = findManualOverrideById(action.outputId);
         if (ovr) {
           const bool enable = !ovr->forcedOn;
@@ -458,11 +521,19 @@ static void processQueuedWsActions() {
       }
 
       case WebActionType::TOGGLE_AUX1:
+        if (bike.safeModeActive) {
+          LOG_W("AUX1 manual toggle blocked in SAFE MODE");
+          break;
+        }
         bike.aux1ManualOn = !bike.aux1ManualOn;
         LOG_D("AUX1 manual: %s", bike.aux1ManualOn ? "ON" : "OFF");
         break;
 
       case WebActionType::TOGGLE_AUX2:
+        if (bike.safeModeActive) {
+          LOG_W("AUX2 manual toggle blocked in SAFE MODE");
+          break;
+        }
         bike.aux2ManualOn = !bike.aux2ManualOn;
         LOG_D("AUX2 manual: %s", bike.aux2ManualOn ? "ON" : "OFF");
         break;
@@ -781,14 +852,54 @@ static void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
 // PUBLIC API
 // ============================================================================
 
+void webSetReducedLoadMode(bool enabled) {
+  stateBroadcastIntervalMs = enabled
+      ? BROADCAST_INTERVAL_MS_REDUCED
+      : BROADCAST_INTERVAL_MS_DEFAULT;
+  keylessCheckIntervalMs = enabled
+      ? KEYLESS_CHECK_INTERVAL_MS_REDUCED
+      : KEYLESS_CHECK_INTERVAL_MS_DEFAULT;
+  keylessKeepaliveMs = enabled
+      ? KEYLESS_KEEPALIVE_MS_REDUCED
+      : KEYLESS_KEEPALIVE_MS_DEFAULT;
+  LOG_I("Web load mode: %s (state=%lums keyless=%lums)",
+        enabled ? "REDUCED" : "NORMAL",
+        stateBroadcastIntervalMs, keylessCheckIntervalMs);
+}
+
 void webInit() {
   inputClearAllManualOverrides();
 
   // WiFi Access Point
+  WiFi.persistent(false);
+  WiFi.softAPdisconnect(true);
+  delay(80);
+  WiFi.mode(WIFI_MODE_NULL);
+  delay(30);
   WiFi.mode(WIFI_AP);
-  WiFi.softAP(AP_SSID, AP_PASS);
-  LOG_I("WiFi AP started: %s (IP: %s)",
-        AP_SSID, WiFi.softAPIP().toString().c_str());
+  makeApSsid(activeApSsid, sizeof(activeApSsid), false);
+  bool apOk = WiFi.softAP(
+      activeApSsid, AP_PASS, AP_CHANNEL, 0, AP_MAX_CONNECTIONS, false);
+  activeApOpenFallback = false;
+  if (!apOk) {
+    LOG_E("WiFi AP start failed with WPA2 (ssid=%s, passLen=%u). "
+          "Retrying OPEN fallback.",
+          activeApSsid, (unsigned)strlen(AP_PASS));
+    makeApSsid(activeApSsid, sizeof(activeApSsid), true);
+    apOk = WiFi.softAP(
+        activeApSsid, nullptr, AP_CHANNEL, 0, AP_MAX_CONNECTIONS, false);
+    activeApOpenFallback = apOk;
+  }
+  if (!apOk) {
+    LOG_E("WiFi AP failed to start");
+  } else {
+    LOG_I("WiFi AP started: %s (IP: %s, CH=%u, auth=%s)",
+          activeApSsid, WiFi.softAPIP().toString().c_str(),
+          AP_CHANNEL, activeApOpenFallback ? "OPEN" : "WPA2-PSK");
+    if (!activeApOpenFallback) {
+      LOG_I("WiFi AP password: %s", AP_PASS);
+    }
+  }
 
   // mDNS – makes the dashboard accessible via http://moto32.local
   if (MDNS.begin("moto32")) {
@@ -862,7 +973,7 @@ void webInit() {
       String out;
       serializeJson(doc, out);
       // Broadcast OTA result to all WS clients
-      ws.textAll(out);
+      wsBroadcastText(out);
       req->send(200, "application/json",
                 success ? "{\"ok\":true}" : "{\"ok\":false}");
       if (success) {
@@ -907,6 +1018,11 @@ void webInit() {
     doc["chip"]     = ESP.getChipModel();
     doc["freeHeap"] = ESP.getFreeHeap();
     doc["uptime"]   = millis() / 1000;
+    doc["safeMode"] = bike.safeModeActive;
+    doc["bootLoopCounter"] = bike.bootLoopCounter;
+    doc["resetReasonCode"] = bike.resetReasonCode;
+    doc["resetReason"] = resetReasonCodeToText(bike.resetReasonCode);
+    doc["coreDumpPartitionFound"] = bike.coreDumpPartitionFound;
     String out;
     serializeJson(doc, out);
     req->send(200, "application/json", out);
@@ -922,6 +1038,20 @@ void webInit() {
 }
 
 void webApplyOutputOverrides() {
+  if (bike.safeModeActive) {
+    bool cleared = false;
+    for (size_t i = 0; i < MANUAL_OUTPUT_OVERRIDE_COUNT; i++) {
+      if (manualOutputOverrides[i].forcedOn) {
+        manualOutputOverrides[i].forcedOn = false;
+        cleared = true;
+      }
+    }
+    if (cleared) {
+      LOG_I("Manual output overrides cleared (SAFE MODE)");
+    }
+    return;
+  }
+
   if (!bike.ignitionOn) {
     bool cleared = false;
     for (size_t i = 0; i < MANUAL_OUTPUT_OVERRIDE_COUNT; i++) {
@@ -953,13 +1083,17 @@ void webUpdate() {
   // Execute deferred operations on loop task (not async_tcp task).
   processQueuedWsActions();
 
-  if (now - lastStateCheck < BROADCAST_INTERVAL_MS) return;
+  if (now - lastStateCheck < stateBroadcastIntervalMs) return;
   lastStateCheck = now;
 
   // Cleanup dead connections
-  ws.cleanupClients();
+  if (now - lastWsCleanup >= WS_CLEANUP_INTERVAL_MS) {
+    lastWsCleanup = now;
+    ws.cleanupClients();
+  }
 
   if (ws.count() == 0) return;
+  if (!wsReadyForBroadcast()) return;
 
   // Build state and broadcast only on change (or keepalive).
   JsonDocument doc;
@@ -968,23 +1102,25 @@ void webUpdate() {
   serializeJson(doc, stateOut);
   if (stateOut != lastStatePayload
       || (now - lastStateBroadcast) >= STATE_KEEPALIVE_MS) {
-    ws.textAll(stateOut);
-    lastStatePayload = stateOut;
-    lastStateBroadcast = now;
+    if (wsBroadcastText(stateOut)) {
+      lastStatePayload = stateOut;
+      lastStateBroadcast = now;
+    }
   }
 
   // Keyless status is less dynamic than core state.
-  if (now - lastKeylessCheck >= KEYLESS_CHECK_INTERVAL_MS) {
+  if (now - lastKeylessCheck >= keylessCheckIntervalMs) {
     lastKeylessCheck = now;
     JsonDocument kdoc;
     bleKeylessBuildJson(kdoc);
     String keylessOut;
     serializeJson(kdoc, keylessOut);
     if (keylessOut != lastKeylessPayload
-        || (now - lastKeylessBroadcast) >= KEYLESS_KEEPALIVE_MS) {
-      ws.textAll(keylessOut);
-      lastKeylessPayload = keylessOut;
-      lastKeylessBroadcast = now;
+        || (now - lastKeylessBroadcast) >= keylessKeepaliveMs) {
+      if (wsBroadcastText(keylessOut)) {
+        lastKeylessPayload = keylessOut;
+        lastKeylessBroadcast = now;
+      }
     }
   }
 }
@@ -996,5 +1132,5 @@ void webLog(const char* text) {
   doc["text"] = text;
   String out;
   serializeJson(doc, out);
-  ws.textAll(out);
+  wsBroadcastText(out);
 }

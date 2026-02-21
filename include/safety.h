@@ -8,16 +8,16 @@ void safetyInitWatchdog();
 // Feed watchdog – call every loop iteration
 void safetyFeedWatchdog();
 
-// Read battery voltage via ADC (filtered)
+// Battery-voltage handling (currently disabled/no-op for USB bench operation)
 void safetyUpdateVoltage();
 
 // Get last filtered voltage reading
 float safetyGetVoltage();
 
-// True when battery voltage is critically low (and VBAT input is valid/present).
+// Always false while voltage logic is disabled.
 bool safetyIsCriticalLowVoltage();
 
-// Check voltage thresholds, set error flags
+// Clears voltage-related warning/error flags (no threshold logic).
 void safetyCheckVoltage();
 
 // Handle sidestand safety logic
@@ -28,3 +28,6 @@ void safetyApplyPriorities();
 
 // Resolve hazard state from emergency + manual
 void resolveHazardState();
+
+// Validate input plausibility (stuck switches, implausible combos/noise)
+void safetyRunInputPlausibilityChecks();
