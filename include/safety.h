@@ -14,6 +14,9 @@ void safetyUpdateVoltage();
 // Get last filtered voltage reading
 float safetyGetVoltage();
 
+// True when battery voltage is critically low (and VBAT input is valid/present).
+bool safetyIsCriticalLowVoltage();
+
 // Check voltage thresholds, set error flags
 void safetyCheckVoltage();
 

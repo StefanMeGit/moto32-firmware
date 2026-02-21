@@ -40,6 +40,13 @@ Current code base: **Firmware v2.2.0** (with additional stability updates integr
 - Keyless detection reworked:
   - no sticky `detected` flag
   - uses recent-seen timeout (`lastSeenMs`) + RSSI threshold logic.
+- Keyless BLE robustness/security improvements:
+  - bonding + passkey `0691` enabled
+  - Apple name fallback matching for randomized iOS advertiser addresses.
+- ADVANCED override safety guardrails:
+  - starter/ignition outputs blocked from manual forcing
+  - forced outputs are cleared when ignition is off
+  - horn/AUX forcing is blocked on critical undervoltage.
 - Watchdog timeout increased from `3s` to `8s` for safer headroom.
 
 ---
@@ -59,6 +66,177 @@ Current code base: **Firmware v2.2.0** (with additional stability updates integr
 - Voltage monitoring with filtering and low/high voltage protection.
 - Setup/calibration mode for output verification.
 - Persistent settings in NVS.
+
+---
+
+## Dependency Overview (Fundamental Logic)
+
+This section documents the effective runtime dependencies between inputs, state, safety logic, and outputs.
+
+### Runtime order (important)
+
+The main loop executes in this order:
+
+1. Read/debounce inputs and build button events.
+2. Process bike logic handlers (`handleLock`, `handleTurnSignals`, `handleLight`, `handleStart`, `handleHorn`, `handleBrake`, speed pulses).
+3. Run keyless state machine and apply keyless ignition grant.
+4. Apply safety priorities (`kill`, `ignition off`, sidestand).
+5. Apply starter light suppression restore logic.
+6. Update outputs (`ignition`, turns, lights, brake, horn, starter, AUX, parking, alarm).
+7. Apply web ADVANCED output overrides last.
+
+ADVANCED override guardrails:
+- Only non-critical outputs are overridable (`turn`, `low/high`, `brake`, `horn`, `aux`).
+- `ignition` and `starter` outputs are blocked from manual override.
+- Overrides auto-clear when ignition turns off.
+- Horn/AUX overrides are blocked during critical undervoltage.
+
+Source:
+- `src/main.cpp`
+- `src/safety.cpp`
+- `src/bike_logic.cpp`
+- `src/web_server.cpp`
+
+### Input dependencies
+
+| Input | Condition / Event | Effect on state |
+|------|--------------------|-----------------|
+| Lock (`PIN_LOCK`) | pressed | `ignitionOn = true` |
+| Lock (`PIN_LOCK`) | released | ignition off, engine/starter off, hazards reset, low/high beam reset |
+| Turn left/right | press | toggles respective turn side (if no hazard) |
+| Turn left + right | long-press simultaneous | manual hazard toggle |
+| Light button | short press | low beam on or high beam toggle |
+| Light button | long press | low beam off + high beam off |
+| Start button | press (single) | starter engage only if `ignitionOn && !killActive && !engineRunning` |
+| Start button | double-click | engine kill (`engineRunning=false`, `starterEngaged=false`, `killActive=true`) |
+| Horn button | state | updates `hornPressed` |
+| Brake input | active | updates `brakePressed` and brake timing |
+| Kill input | active based on `standKillMode % 3` | forces `killActive`; stops engine and starter |
+| Sidestand input | active and stand safety enabled | if engine running: engine kill + stand error flag |
+| Speed input | rising edge | increments `speedPulseCount` |
+| Keyless BLE | phone detected/hysteresis satisfied | grants ignition (`ignitionGranted`) |
+
+Notes:
+- Inputs are debounced (`DEBOUNCE_DELAY_MS = 50ms`).
+- `PIN_LOCK` is active HIGH; most others are active LOW.
+
+### Safety priority dependencies
+
+Safety is applied before outputs every loop:
+
+1. Kill switch handling (`killActive` from config + input).
+2. If `killActive`: force `engineRunning=false` and `starterEngaged=false`.
+3. If `ignitionOn == false`: force dynamic drive states off (`left/right turn`, `manual hazard`, `engine`, `starter`).
+4. Sidestand safety (depending on `standKillMode` groups).
+5. Recompute hazard composite state.
+
+Source: `src/safety.cpp`
+
+### Output dependencies (per output)
+
+#### Ignition output (`PIN_IGN_OUT`)
+
+| ON when | OFF when |
+|---------|----------|
+| `ignitionOn && !killActive` | otherwise |
+
+Final override:
+- Not overridable in ADVANCED mode (safety-critical output).
+
+#### Starter outputs (`PIN_START_OUT1`, `PIN_START_OUT2`)
+
+| ON when | OFF when |
+|---------|----------|
+| `starterEngaged && ignitionOn && !killActive` | otherwise |
+
+Final override:
+- Not overridable in ADVANCED mode (safety-critical outputs).
+
+#### Turn outputs (`PIN_TURNL_OUT`, `PIN_TURNR_OUT`)
+
+Applied priority:
+
+1. If `starterEngaged`: both OFF.
+2. If BLE connect acknowledge active: quick left/right sequence.
+3. Else normal turn/hazard logic (mo.wave optional for single side).
+4. Parking light mode (when ignition OFF) can drive one side steady.
+5. Alarm mode can flash both sides.
+6. ADVANCED web override can force either side ON at end.
+
+#### Low beam (`PIN_LIGHT_OUT`)
+
+Applied priority:
+
+1. If ignition OFF: OFF unless parking mode keeps position light active.
+2. If `starterEngaged`: OFF.
+3. Else low beam mode logic:
+   - mode 0: state-driven (`bike.lowBeamOn`)
+   - mode 1: always on with ignition
+   - mode 2: manual state-driven
+4. If low beam OFF and `positionLight > 0`: PWM dim output.
+5. ADVANCED web override can force ON.
+
+#### High beam (`PIN_HIBEAM_OUT`)
+
+| ON when | OFF when |
+|---------|----------|
+| `bike.highBeamOn` (and not blocked by starter/ignition-off path) | ignition OFF, starter engaged, or `highBeamOn=false` |
+
+Final override:
+- Can be forced ON by ADVANCED web override.
+
+#### Brake light (`PIN_BRAKE_OUT`)
+
+Applied priority:
+
+1. If `starterEngaged`: OFF.
+2. If not braking: depends on rear light mode.
+3. If braking: depends on selected brake light mode (continuous/fade/flash/etc.).
+4. ADVANCED web override can force ON.
+
+#### Horn output (`PIN_HORN_OUT`)
+
+Applied priority:
+
+1. Normal logic: ON when `hornPressed && ignitionOn`.
+2. Alarm logic may pulse horn while alarm triggered.
+3. If battery is critically low (`VBAT_CRITICAL_LOW`), horn is forced OFF.
+4. ADVANCED web override can force ON only while ignition is ON and voltage is not critically low.
+
+#### AUX outputs (`PIN_AUX1_OUT`, `PIN_AUX2_OUT`)
+
+Depends on per-channel mode:
+
+| Mode | Condition for ON |
+|------|-------------------|
+| 0 | ignition ON |
+| 1 | engine running |
+| 2 | manual toggle ON and ignition ON |
+| 3 | always OFF |
+
+Final override:
+- ADVANCED web override can force ON only while ignition is ON and voltage is not critically low.
+
+### Ignition prerequisites summary
+
+Ignition state (`bike.ignitionOn`) is granted by:
+
+1. Physical lock press event.
+2. Keyless grant if BLE logic allows and ignition currently off.
+
+Ignition-related blockers:
+
+1. Kill switch active (`killActive`) blocks ignition output and starter.
+2. Ignition off state forces dynamic riding outputs/states down in safety stage.
+
+### BLE keyless scan dependency
+
+Automatic keyless background scans are suspended while ignition is ON.
+
+- Goal: reduce runtime overhead once the bike is already active.
+- Manual web-triggered scan is still allowed in BLE tab.
+
+Source: `src/ble_interface.cpp`
 
 ---
 
@@ -223,6 +401,8 @@ Device name: `Moto32`
 - Up to 3 paired devices.
 - iOS devices may appear as `Apple Device` during scan (no local name in advertisement is normal).
 - Detection uses RSSI threshold + recent scan freshness timeout.
+- Matching uses paired MAC and an Apple-name fallback for randomized iOS advertiser addresses.
+- BLE security is enabled (bonding + MITM + passkey `0691`).
 
 ---
 
@@ -242,6 +422,7 @@ Device name: `Moto32`
 - `otadata`
 - `app0`, `app1` (OTA slots)
 - `spiffs` (reserved; dashboard is embedded and does not rely on FS upload)
+- `coredump` (stores panic dumps for post-mortem crash analysis)
 
 ---
 

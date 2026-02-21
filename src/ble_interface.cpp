@@ -1,8 +1,11 @@
 #include "ble_interface.h"
+#include "inputs.h"
 #include "settings_store.h"
 #include <NimBLEDevice.h>
+#include <NimBLESecurity.h>
 #include <Preferences.h>
 #include <nvs_flash.h>
+#include <ctype.h>
 
 // ============================================================================
 // GATT SERVER (diagnostics / settings – original)
@@ -24,10 +27,36 @@ static unsigned long lastBleUpdate = 0;
 // ============================================================================
 
 #define MAX_PAIRED_DEVICES 3
-#define KEYLESS_SCAN_INTERVAL_MS  2000
+#define KEYLESS_IDLE_SCAN_INTERVAL_MS    2000
+#define KEYLESS_REFRESH_SCAN_INTERVAL_MS 30000
+#define KEYLESS_IDLE_SCAN_SECONDS        1
+#define KEYLESS_REFRESH_SCAN_SECONDS     2
+#define KEYLESS_FAILED_SCAN_EXTENSION_SECONDS 10
 #define KEYLESS_DETECT_HOLD_MS    3000   // Must see phone for 3s before unlock
-#define KEYLESS_LOST_TIMEOUT_MS   5000   // Phone must be gone 5s before lock
 #define KEYLESS_SEEN_TIMEOUT_MS   4500   // Keep detection valid for recent scan data
+#define KEYLESS_PASSKEY            691
+#define KEYLESS_RSSI_LEVEL_MIN      1
+#define KEYLESS_RSSI_LEVEL_MAX      6
+#define KEYLESS_RSSI_LEVEL_DEFAULT  4
+#define KEYLESS_RSSI_DBM_MIN      -100
+#define KEYLESS_RSSI_DBM_MAX       -30
+#define KEYLESS_ACTIVE_DEFAULT_MINUTES 5
+static const int KEYLESS_ACTIVE_MINUTES_OPTIONS[] = {1, 5, 10};
+static const size_t KEYLESS_ACTIVE_MINUTES_OPTION_COUNT =
+    sizeof(KEYLESS_ACTIVE_MINUTES_OPTIONS) / sizeof(KEYLESS_ACTIVE_MINUTES_OPTIONS[0]);
+#define KEYLESS_ACTIVATION_MODE_ANY      0
+#define KEYLESS_ACTIVATION_MODE_SELECTED 1
+#define KEYLESS_ACTIVATION_MODE_DEFAULT  KEYLESS_ACTIVATION_MODE_ANY
+#define KEYLESS_ACTIVATION_BUTTON_DEFAULT 0
+
+enum KeylessActivationButton : uint8_t {
+  KEYLESS_BUTTON_START = 0,
+  KEYLESS_BUTTON_LIGHT = 1,
+  KEYLESS_BUTTON_HORN  = 2,
+  KEYLESS_BUTTON_LEFT  = 3,
+  KEYLESS_BUTTON_RIGHT = 4,
+  KEYLESS_BUTTON_COUNT
+};
 
 struct PairedDevice {
   bool    valid = false;
@@ -40,29 +69,161 @@ struct PairedDevice {
 
 static struct {
   bool    enabled         = false;
-  int     rssiThreshold   = -65;
-  int     graceSeconds    = 10;
+  int     rssiLevel       = KEYLESS_RSSI_LEVEL_DEFAULT;
+  int     rssiThreshold   = -76;   // Derived from level (default level 4)
+  int     activeMinutes   = KEYLESS_ACTIVE_DEFAULT_MINUTES;
+  uint8_t activationMode  = KEYLESS_ACTIVATION_MODE_DEFAULT;
+  uint8_t activationButton = KEYLESS_ACTIVATION_BUTTON_DEFAULT;
 
   PairedDevice devices[MAX_PAIRED_DEVICES];
   int  pairedCount        = 0;
 
-  // State machine
+  // Session state
   bool phoneDetected      = false;
+  bool statusDetected     = false;
   bool ignitionGranted    = false;
-  bool engineWasRunning   = false;
-  bool graceActive        = false;
-  unsigned long graceStart = 0;
+  bool ignitionOwned      = false;
+  bool requestIgnitionOn  = false;
+  bool requestIgnitionOff = false;
   unsigned long firstDetectTime = 0;
-  unsigned long lastDetectTime  = 0;
+  unsigned long sessionStartMs  = 0;
+  unsigned long sessionExpiryMs = 0;
 
   // Scanning
-  bool         scanActive  = false;
-  NimBLEScan*  pScan       = nullptr;
-  unsigned long lastScanTime = 0;
+  bool         scanActive           = false;   // Manual web scan for pairing
+  bool         autoScanActive       = false;   // Automatic background scan
+  bool         sessionRefreshScan   = false;   // Auto scan while session active
+  bool         autoScanExtended     = false;   // One-time 10s extension after failed auto scan
+  NimBLEScan*  pScan                = nullptr;
+  unsigned long lastIdleScanTime    = 0;
+  unsigned long lastRefreshScanTime = 0;
 } keyless;
 
 static Preferences keylessPref;
 static const char* KEYLESS_NAMESPACE = "ble_kl";
+
+static int clampRssiLevel(int level) {
+  return constrain(level, KEYLESS_RSSI_LEVEL_MIN, KEYLESS_RSSI_LEVEL_MAX);
+}
+
+static int rssiThresholdForLevel(int level) {
+  switch (clampRssiLevel(level)) {
+    case 1:  return -100;  // Very weak signal still accepted
+    case 2:  return -92;
+    case 3:  return -84;
+    case 4:  return -76;   // Default
+    case 5:  return -68;
+    case 6:  return -60;   // Strong signal required
+    default: return -76;
+  }
+}
+
+static int rssiLevelForThreshold(int thresholdDbm) {
+  const int dbm = constrain(thresholdDbm, KEYLESS_RSSI_DBM_MIN, KEYLESS_RSSI_DBM_MAX);
+  int bestLevel = KEYLESS_RSSI_LEVEL_DEFAULT;
+  int bestDiff = abs(dbm - rssiThresholdForLevel(bestLevel));
+  for (int level = KEYLESS_RSSI_LEVEL_MIN; level <= KEYLESS_RSSI_LEVEL_MAX; level++) {
+    const int diff = abs(dbm - rssiThresholdForLevel(level));
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestLevel = level;
+    }
+  }
+  return bestLevel;
+}
+
+static void applyRssiLevel(int level) {
+  keyless.rssiLevel = clampRssiLevel(level);
+  keyless.rssiThreshold = rssiThresholdForLevel(keyless.rssiLevel);
+}
+
+static int normalizeActiveMinutes(int minutes) {
+  int best = KEYLESS_ACTIVE_MINUTES_OPTIONS[0];
+  int bestDiff = abs(minutes - best);
+  for (size_t i = 1; i < KEYLESS_ACTIVE_MINUTES_OPTION_COUNT; i++) {
+    const int candidate = KEYLESS_ACTIVE_MINUTES_OPTIONS[i];
+    const int diff = abs(minutes - candidate);
+    if (diff < bestDiff) {
+      best = candidate;
+      bestDiff = diff;
+    }
+  }
+  return best;
+}
+
+static uint8_t normalizeActivationMode(int mode) {
+  return (mode == KEYLESS_ACTIVATION_MODE_SELECTED)
+      ? KEYLESS_ACTIVATION_MODE_SELECTED
+      : KEYLESS_ACTIVATION_MODE_ANY;
+}
+
+static uint8_t normalizeActivationButton(int button) {
+  if (button < 0 || button >= (int)KEYLESS_BUTTON_COUNT) {
+    return KEYLESS_ACTIVATION_BUTTON_DEFAULT;
+  }
+  return (uint8_t)button;
+}
+
+static int activeMinutesFromLegacySeconds(int seconds) {
+  if (seconds <= 0) {
+    return KEYLESS_ACTIVE_DEFAULT_MINUTES;
+  }
+  const int approxMinutes = max(1, (seconds + 30) / 60);
+  return normalizeActiveMinutes(approxMinutes);
+}
+
+static bool timeReached(unsigned long now, unsigned long deadline) {
+  return (long)(now - deadline) >= 0;
+}
+
+static int sessionRemainingSeconds(unsigned long now) {
+  if (!keyless.ignitionGranted || keyless.sessionExpiryMs == 0) return 0;
+  if (timeReached(now, keyless.sessionExpiryMs)) return 0;
+  const unsigned long remainingMs = keyless.sessionExpiryMs - now;
+  return (int)((remainingMs + 999UL) / 1000UL);
+}
+
+static int nextAutoScanInSeconds(unsigned long now) {
+  if (!keyless.enabled || keyless.pairedCount == 0) return -1;
+  if (keyless.autoScanActive) return 0;
+
+  const unsigned long intervalMs = keyless.ignitionGranted
+      ? KEYLESS_REFRESH_SCAN_INTERVAL_MS
+      : KEYLESS_IDLE_SCAN_INTERVAL_MS;
+  const unsigned long lastScanMs = keyless.ignitionGranted
+      ? keyless.lastRefreshScanTime
+      : keyless.lastIdleScanTime;
+
+  if (now - lastScanMs >= intervalMs) return 0;
+  const unsigned long remainMs = intervalMs - (now - lastScanMs);
+  return (int)((remainMs + 999UL) / 1000UL);
+}
+
+static bool isSelectedActivationButtonPressed() {
+  switch (keyless.activationButton) {
+    case KEYLESS_BUTTON_START: return startEvent.pressed;
+    case KEYLESS_BUTTON_LIGHT: return lightEvent.pressed;
+    case KEYLESS_BUTTON_HORN:  return hornEvent.pressed;
+    case KEYLESS_BUTTON_LEFT:  return turnLeftEvent.pressed;
+    case KEYLESS_BUTTON_RIGHT: return turnRightEvent.pressed;
+    default: return false;
+  }
+}
+
+static bool isAnyActivationButtonPressed() {
+  return startEvent.pressed
+      || lightEvent.pressed
+      || hornEvent.pressed
+      || turnLeftEvent.pressed
+      || turnRightEvent.pressed;
+}
+
+static bool isActivationButtonPressed() {
+  if (keyless.activationMode == KEYLESS_ACTIVATION_MODE_SELECTED) {
+    return isSelectedActivationButtonPressed();
+  }
+  return isAnyActivationButtonPressed();
+}
 
 // ============================================================================
 // KEYLESS PERSISTENCE
@@ -105,8 +266,12 @@ static void saveKeylessConfig() {
     return;
   }
   keylessPref.putBool("enabled", keyless.enabled);
+  keylessPref.putUChar("rssiLvl", (uint8_t)keyless.rssiLevel);
   keylessPref.putInt("rssi", keyless.rssiThreshold);
-  keylessPref.putInt("grace", keyless.graceSeconds);
+  keylessPref.putInt("activeMin", keyless.activeMinutes);
+  keylessPref.putUChar("actMode", keyless.activationMode);
+  keylessPref.putUChar("actBtn", keyless.activationButton);
+  keylessPref.remove("grace");  // remove legacy key if still present
   keylessPref.putInt("count", keyless.pairedCount);
   for (int i = 0; i < MAX_PAIRED_DEVICES; i++) {
     char macKey[12];
@@ -132,15 +297,35 @@ static void loadKeylessConfig() {
 
   if (!beginKeylessPrefsWithRecovery(false)) {
     keyless.enabled = false;
-    keyless.rssiThreshold = -65;
-    keyless.graceSeconds = 10;
+    applyRssiLevel(KEYLESS_RSSI_LEVEL_DEFAULT);
+    keyless.activeMinutes = KEYLESS_ACTIVE_DEFAULT_MINUTES;
+    keyless.activationMode = KEYLESS_ACTIVATION_MODE_DEFAULT;
+    keyless.activationButton = KEYLESS_ACTIVATION_BUTTON_DEFAULT;
     LOG_W("Keyless config load fallback: defaults");
     return;
   }
 
   keyless.enabled       = keylessPref.getBool("enabled", false);
-  keyless.rssiThreshold = constrain(keylessPref.getInt("rssi", -65), -90, -30);
-  keyless.graceSeconds  = constrain(keylessPref.getInt("grace", 10), 5, 60);
+  if (keylessPref.isKey("rssiLvl")) {
+    applyRssiLevel(keylessPref.getUChar("rssiLvl", KEYLESS_RSSI_LEVEL_DEFAULT));
+  } else {
+    // Legacy compatibility: convert old dBm threshold to nearest level.
+    int legacyDbm = constrain(keylessPref.getInt("rssi", -76),
+                              KEYLESS_RSSI_DBM_MIN, KEYLESS_RSSI_DBM_MAX);
+    applyRssiLevel(rssiLevelForThreshold(legacyDbm));
+  }
+  if (keylessPref.isKey("activeMin")) {
+    keyless.activeMinutes = normalizeActiveMinutes(
+        keylessPref.getInt("activeMin", KEYLESS_ACTIVE_DEFAULT_MINUTES));
+  } else {
+    // Legacy compatibility: convert old grace seconds to session minutes.
+    keyless.activeMinutes = activeMinutesFromLegacySeconds(
+        keylessPref.getInt("grace", KEYLESS_ACTIVE_DEFAULT_MINUTES * 60));
+  }
+  keyless.activationMode = normalizeActivationMode(
+      keylessPref.getUChar("actMode", KEYLESS_ACTIVATION_MODE_DEFAULT));
+  keyless.activationButton = normalizeActivationButton(
+      keylessPref.getUChar("actBtn", KEYLESS_ACTIVATION_BUTTON_DEFAULT));
   for (int i = 0; i < MAX_PAIRED_DEVICES; i++) {
     char macKey[12];
     char nameKey[12];
@@ -162,7 +347,11 @@ static void loadKeylessConfig() {
     }
   }
   keylessPref.end();
-  LOG_I("Keyless: loaded %d paired devices, enabled=%d", keyless.pairedCount, keyless.enabled);
+  LOG_I("Keyless: loaded %d paired devices, enabled=%d, level=%d (%d dBm), active=%d min, trigger=%s/%u",
+        keyless.pairedCount, keyless.enabled,
+        keyless.rssiLevel, keyless.rssiThreshold, keyless.activeMinutes,
+        keyless.activationMode == KEYLESS_ACTIVATION_MODE_SELECTED ? "selected" : "any",
+        keyless.activationButton);
 }
 
 // ============================================================================
@@ -185,9 +374,63 @@ static bool macEquals(const uint8_t* a, const uint8_t* b) {
   return memcmp(a, b, 6) == 0;
 }
 
+static bool isGenericDeviceLabel(const char* name) {
+  if (!name || !name[0]) return true;
+  return strcmp(name, "Unknown Device") == 0
+      || strcmp(name, "Apple Device") == 0;
+}
+
+static bool equalsIgnoreCase(const char* a, const std::string& b) {
+  if (!a || !a[0] || b.empty()) return false;
+  size_t i = 0;
+  for (; a[i] != '\0' && i < b.size(); i++) {
+    if (tolower((unsigned char)a[i]) != tolower((unsigned char)b[i])) {
+      return false;
+    }
+  }
+  return a[i] == '\0' && i == b.size();
+}
+
+static uint16_t manufacturerCompanyId(const std::string& mfg) {
+  if (mfg.size() < 2) return 0;
+  return ((uint16_t)(uint8_t)mfg[1] << 8) | (uint8_t)mfg[0];
+}
+
 // ============================================================================
 // GATT CALLBACKS
 // ============================================================================
+
+class SecurityCB : public NimBLESecurityCallbacks {
+  uint32_t onPassKeyRequest() override {
+    LOG_I("BLE security: passkey requested (use %04u)", KEYLESS_PASSKEY);
+    return KEYLESS_PASSKEY;
+  }
+
+  void onPassKeyNotify(uint32_t pass_key) override {
+    LOG_I("BLE security: passkey notify %06lu", (unsigned long)pass_key);
+  }
+
+  bool onSecurityRequest() override {
+    LOG_I("BLE security: incoming security request accepted");
+    return true;
+  }
+
+  void onAuthenticationComplete(ble_gap_conn_desc* desc) override {
+    if (!desc) {
+      LOG_W("BLE security: authentication complete with null descriptor");
+      return;
+    }
+    LOG_I("BLE security: auth complete encrypted=%d bonded=%d mitm=%d",
+          desc->sec_state.encrypted ? 1 : 0,
+          desc->sec_state.bonded ? 1 : 0,
+          desc->sec_state.authenticated ? 1 : 0);
+  }
+
+  bool onConfirmPIN(uint32_t pin) override {
+    LOG_I("BLE security: confirm pin %06lu", (unsigned long)pin);
+    return true;
+  }
+};
 
 class ServerCB : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer*) override {
@@ -250,6 +493,67 @@ struct ScanResult {
 static ScanResult scanResults[16];
 static int scanResultCount = 0;
 static bool scanResultsReady = false;
+static void onScanComplete(NimBLEScanResults results);
+
+static void clearDeviceDetectionFlags() {
+  for (int i = 0; i < MAX_PAIRED_DEVICES; i++) {
+    keyless.devices[i].detected = false;
+  }
+}
+
+static bool anyPairedDeviceInRange(unsigned long now) {
+  bool anyDetected = false;
+  for (int i = 0; i < MAX_PAIRED_DEVICES; i++) {
+    if (!keyless.devices[i].valid) {
+      keyless.devices[i].detected = false;
+      continue;
+    }
+
+    const bool seenRecently = keyless.devices[i].lastSeenMs != 0
+        && (now - keyless.devices[i].lastSeenMs) <= KEYLESS_SEEN_TIMEOUT_MS;
+    const bool inRange = seenRecently
+        && (keyless.devices[i].lastRssi >= keyless.rssiThreshold);
+    keyless.devices[i].detected = inRange;
+    if (inRange) anyDetected = true;
+  }
+  return anyDetected;
+}
+
+static void startIgnitionSession(unsigned long now) {
+  const unsigned long durationMs =
+      (unsigned long)keyless.activeMinutes * 60UL * 1000UL;
+  keyless.ignitionGranted = true;
+  keyless.phoneDetected = true;
+  keyless.statusDetected = true;
+  keyless.sessionStartMs = now;
+  keyless.sessionExpiryMs = now + durationMs;
+  keyless.lastRefreshScanTime = now;
+  keyless.ignitionOwned = !bike.ignitionOn;
+  keyless.requestIgnitionOn = false;
+  keyless.requestIgnitionOff = false;
+}
+
+static void extendIgnitionSession(unsigned long now) {
+  const unsigned long durationMs =
+      (unsigned long)keyless.activeMinutes * 60UL * 1000UL;
+  keyless.sessionStartMs = now;
+  keyless.sessionExpiryMs = now + durationMs;
+}
+
+static bool tryStartAutoScan(uint32_t seconds, bool sessionRefresh, bool extended) {
+  if (!keyless.pScan) return false;
+  if (keyless.pScan->isScanning()) return false;
+  keyless.autoScanActive = true;
+  keyless.sessionRefreshScan = sessionRefresh;
+  keyless.autoScanExtended = extended;
+  if (!keyless.pScan->start(seconds, onScanComplete, false)) {
+    keyless.autoScanActive = false;
+    keyless.sessionRefreshScan = false;
+    keyless.autoScanExtended = false;
+    return false;
+  }
+  return true;
+}
 
 // Helper: extract 6-byte MAC in normal order from NimBLEAddress
 // (getNative() returns bytes in reversed/NimBLE-internal order in v1.4)
@@ -263,36 +567,58 @@ class ScanCB : public NimBLEAdvertisedDeviceCallbacks {
     // Extract MAC in normal byte order
     uint8_t devMac[6];
     addressToMac(dev->getAddress(), devMac);
+    const int rssi = dev->getRSSI();
+    const uint8_t addrType = dev->getAddressType();
+    const std::string advName = dev->getName();
+    const std::string mfg = dev->getManufacturerData();
+    const uint16_t companyId = manufacturerCompanyId(mfg);
+    const bool isApple = (companyId == 0x004C);
 
-    // Check if this is a paired device → update RSSI
+    LOG_D("BLE adv: %s type=%u rssi=%d name='%s' mfg=0x%04X",
+          macToString(devMac).c_str(),
+          addrType,
+          rssi,
+          advName.empty() ? "-" : advName.c_str(),
+          companyId);
+
+    // Check if this is a paired device -> update RSSI.
+    // iPhone fallback: when address randomizes, allow Apple name match.
     for (int i = 0; i < MAX_PAIRED_DEVICES; i++) {
       if (!keyless.devices[i].valid) continue;
-      if (macEquals(devMac, keyless.devices[i].mac)) {
-        keyless.devices[i].lastRssi = dev->getRSSI();
+
+      bool matched = macEquals(devMac, keyless.devices[i].mac);
+      const bool canUseNameFallback =
+          isApple
+          && !advName.empty()
+          && !isGenericDeviceLabel(keyless.devices[i].name)
+          && equalsIgnoreCase(keyless.devices[i].name, advName);
+
+      if (!matched && canUseNameFallback) {
+        matched = true;
+        LOG_D("Keyless fallback match by Apple name: paired='%s' seen='%s' (%s)",
+              keyless.devices[i].name,
+              advName.c_str(),
+              macToString(devMac).c_str());
+      }
+
+      if (matched) {
+        keyless.devices[i].lastRssi = rssi;
         keyless.devices[i].lastSeenMs = millis();
       }
     }
 
     // Store scan results for web UI pairing
     if (keyless.scanActive && scanResultCount < 16) {
-      std::string name = dev->getName();
-      std::string label = name;
+      std::string label = advName;
       if (label.empty()) {
         // iPhones often advertise without local-name in BLE scan packets.
-        bool isApple = false;
-        std::string mfg = dev->getManufacturerData();
-        if (mfg.size() >= 2) {
-          const uint16_t companyId =
-              ((uint8_t)mfg[1] << 8) | (uint8_t)mfg[0];
-          isApple = (companyId == 0x004C);
-        }
         label = isApple ? "Apple Device" : "Unknown Device";
       }
 
       // Deduplicate
       for (int i = 0; i < scanResultCount; i++) {
         if (macEquals(scanResults[i].mac, devMac)) {
-          scanResults[i].rssi = dev->getRSSI();
+          scanResults[i].rssi = rssi;
           return;
         }
       }
@@ -302,7 +628,7 @@ class ScanCB : public NimBLEAdvertisedDeviceCallbacks {
              sizeof(scanResults[scanResultCount].name));
       strncpy(scanResults[scanResultCount].name, label.c_str(),
               sizeof(scanResults[scanResultCount].name) - 1);
-      scanResults[scanResultCount].rssi = dev->getRSSI();
+      scanResults[scanResultCount].rssi = rssi;
       LOG_D("BLE scan result: %s (%s), RSSI=%d",
             scanResults[scanResultCount].name,
             macToString(devMac).c_str(),
@@ -314,6 +640,7 @@ class ScanCB : public NimBLEAdvertisedDeviceCallbacks {
 };
 
 static ScanCB scanCallback;
+static SecurityCB securityCallback;
 
 // Scan-complete callback (free function for v1.4 API)
 static void onScanComplete(NimBLEScanResults results) {
@@ -322,9 +649,51 @@ static void onScanComplete(NimBLEScanResults results) {
   if (keyless.scanActive) {
     keyless.scanActive = false;
     scanResultsReady = true;
-    LOG_I("BLE scan complete: results=%d", scanResultCount);
+    LOG_I("BLE scan complete: results=%d scannerRunning=%d",
+          scanResultCount,
+          keyless.pScan && keyless.pScan->isScanning() ? 1 : 0);
   } else {
-    LOG_D("BLE background scan complete");
+    const bool wasAutoScan = keyless.autoScanActive;
+    const bool wasSessionRefresh = keyless.sessionRefreshScan;
+    const bool wasExtended = keyless.autoScanExtended;
+    keyless.autoScanActive = false;
+    keyless.sessionRefreshScan = false;
+    keyless.autoScanExtended = false;
+
+    if (!wasAutoScan) {
+      return;
+    }
+
+    const unsigned long now = millis();
+    const bool detected = anyPairedDeviceInRange(now);
+    keyless.statusDetected = detected;
+
+    if (!detected && !wasExtended) {
+      LOG_I("Keyless: auto scan no match, extending by %us",
+            KEYLESS_FAILED_SCAN_EXTENSION_SECONDS);
+      if (tryStartAutoScan(KEYLESS_FAILED_SCAN_EXTENSION_SECONDS,
+                           wasSessionRefresh,
+                           true)) {
+        return;
+      }
+      LOG_W("Keyless: extension scan start failed");
+    }
+
+    if (wasSessionRefresh && keyless.ignitionGranted) {
+      keyless.phoneDetected = detected;
+      if (detected) {
+        extendIgnitionSession(now);
+        LOG_I("Keyless: session extended (%d min, RSSI >= %d dBm)",
+              keyless.activeMinutes, keyless.rssiThreshold);
+      } else {
+        LOG_I("Keyless: refresh scan no match, timeout in %ds",
+              sessionRemainingSeconds(now));
+      }
+    } else {
+      LOG_D("BLE background scan complete (detected=%d, extended=%d)",
+            detected ? 1 : 0,
+            wasExtended ? 1 : 0);
+    }
   }
 }
 
@@ -335,6 +704,13 @@ static void onScanComplete(NimBLEScanResults results) {
 void bleInit() {
   NimBLEDevice::init(BLE_DEVICE_NAME);
   NimBLEDevice::setPower(ESP_PWR_LVL_P3);
+  NimBLEDevice::setSecurityAuth(true, true, true);
+  NimBLEDevice::setSecurityIOCap(ESP_IO_CAP_OUT);
+  NimBLEDevice::setSecurityInitKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+  NimBLEDevice::setSecurityRespKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
+  NimBLEDevice::setSecurityPasskey(KEYLESS_PASSKEY);
+  NimBLEDevice::setSecurityCallbacks(&securityCallback);
+  LOG_I("BLE security enabled (bonding + passkey %04u)", KEYLESS_PASSKEY);
 
   // GATT server
   pServer = NimBLEDevice::createServer();
@@ -364,8 +740,8 @@ void bleInit() {
   keyless.pScan = NimBLEDevice::getScan();
   keyless.pScan->setAdvertisedDeviceCallbacks(&scanCallback, true);
   keyless.pScan->setActiveScan(true);
-  keyless.pScan->setInterval(100);
-  keyless.pScan->setWindow(80);
+  keyless.pScan->setInterval(120);
+  keyless.pScan->setWindow(110);
 
   // Load keyless config
   loadKeylessConfig();
@@ -425,140 +801,157 @@ Settings bleGetNewSettings() { newSettingsAvailable = false; return pendingSetti
 // ============================================================================
 //
 // State flow:
-//   LOCKED → (phone detected for 3s) → UNLOCKED (ignition granted)
-//   UNLOCKED → (engine starts) → engineWasRunning = true
-//   UNLOCKED → (engine stops + engineWasRunning) → GRACE (10s countdown)
-//   GRACE → (restart within 10s) → stays UNLOCKED
-//   GRACE → (timeout) → LOCKED (need phone again)
-//   UNLOCKED → (phone lost for 5s without engine running) → LOCKED
+//   LOCKED -> (phone detected for 3s) -> SESSION ACTIVE (ignition granted)
+//   SESSION ACTIVE -> every 30s run refresh scan (2s burst)
+//   SESSION ACTIVE + refresh detected -> extend session to full duration
+//   SESSION ACTIVE + refresh missed -> countdown continues
+//   SESSION ACTIVE + timeout -> lock and request ignition OFF (if keyless-owned)
 //
 // ============================================================================
 
 void bleKeylessUpdate() {
+  keyless.requestIgnitionOn = false;
+  keyless.requestIgnitionOff = false;
+
   if (!keyless.enabled || keyless.pairedCount == 0) {
+    if (keyless.pScan && keyless.pScan->isScanning() && !keyless.scanActive) {
+      keyless.pScan->stop();
+    }
+    keyless.autoScanActive = false;
+    keyless.sessionRefreshScan = false;
+    keyless.autoScanExtended = false;
     keyless.ignitionGranted = false;
+    keyless.ignitionOwned = false;
     keyless.phoneDetected = false;
+    keyless.statusDetected = false;
     keyless.firstDetectTime = 0;
-    for (int i = 0; i < MAX_PAIRED_DEVICES; i++) {
-      keyless.devices[i].detected = false;
+    keyless.sessionStartMs = 0;
+    keyless.sessionExpiryMs = 0;
+    clearDeviceDetectionFlags();
+    return;
+  }
+
+  const unsigned long now = millis();
+  const bool anyDetected = anyPairedDeviceInRange(now);
+
+  if (!keyless.ignitionGranted) {
+    // Idle background scan while locked.
+    if (now - keyless.lastIdleScanTime >= KEYLESS_IDLE_SCAN_INTERVAL_MS) {
+      keyless.lastIdleScanTime = now;
+      tryStartAutoScan(KEYLESS_IDLE_SCAN_SECONDS, false, false);
+    }
+
+    if (anyDetected) {
+      if (keyless.firstDetectTime == 0) {
+        keyless.firstDetectTime = now;
+        LOG_D("Keyless: detection hold started");
+      } else if (now - keyless.firstDetectTime >= KEYLESS_DETECT_HOLD_MS) {
+        startIgnitionSession(now);
+        keyless.firstDetectTime = 0;
+        LOG_I("Keyless: session started (%d min, threshold L%d/%d dBm, owned=%d)",
+              keyless.activeMinutes,
+              keyless.rssiLevel,
+              keyless.rssiThreshold,
+              keyless.ignitionOwned ? 1 : 0);
+      }
+    } else {
+      keyless.phoneDetected = false;
+      keyless.firstDetectTime = 0;
     }
     return;
   }
 
-  unsigned long now = millis();
+  // Active session.
+  keyless.phoneDetected = anyDetected;
 
-  // Periodic background scan for paired devices
-  if (now - keyless.lastScanTime >= KEYLESS_SCAN_INTERVAL_MS) {
-    keyless.lastScanTime = now;
-    // Short scan burst (non-blocking)
-    if (keyless.pScan && !keyless.pScan->isScanning()) {
-      keyless.pScan->start(1, onScanComplete, false);  // 1 second, non-blocking
-    }
+  // BLE ignition activation requires a button trigger.
+  if (!bike.ignitionOn && isActivationButtonPressed()) {
+    keyless.requestIgnitionOn = true;
+    LOG_I("Keyless: ignition ON requested by button trigger (mode=%u btn=%u)",
+          keyless.activationMode, keyless.activationButton);
   }
 
-  // Check if any paired device is in range using recent scan freshness.
-  bool anyDetected = false;
-  for (int i = 0; i < MAX_PAIRED_DEVICES; i++) {
-    if (!keyless.devices[i].valid) {
-      keyless.devices[i].detected = false;
-      continue;
-    }
-
-    const bool seenRecently = keyless.devices[i].lastSeenMs != 0
-        && (now - keyless.devices[i].lastSeenMs) <= KEYLESS_SEEN_TIMEOUT_MS;
-    const bool inRange = seenRecently
-        && (keyless.devices[i].lastRssi >= keyless.rssiThreshold);
-    keyless.devices[i].detected = inRange;
-
-    if (inRange) anyDetected = true;
+  // Keep keyless session alive while engine is running. Engine state is
+  // externally maintained and only cleared by kill switch / ignition lock logic.
+  if (bike.engineRunning && keyless.sessionExpiryMs != 0) {
+    extendIgnitionSession(now);
+    return;
   }
 
-  // ── Phone detection with hysteresis ──
-
-  if (anyDetected && !keyless.phoneDetected) {
-    // First detection → start hold timer
-    if (keyless.firstDetectTime == 0) {
-      keyless.firstDetectTime = now;
-    }
-    // Must be detected for KEYLESS_DETECT_HOLD_MS continuously
-    if (now - keyless.firstDetectTime >= KEYLESS_DETECT_HOLD_MS) {
-      keyless.phoneDetected = true;
-      keyless.lastDetectTime = now;
-      keyless.ignitionGranted = true;
-      keyless.graceActive = false;
-      LOG_I("Keyless: phone detected – ignition granted");
-    }
-  } else if (anyDetected) {
-    keyless.lastDetectTime = now;
-    keyless.firstDetectTime = now;  // Keep resetting
-  } else {
+  if (keyless.sessionExpiryMs != 0 && timeReached(now, keyless.sessionExpiryMs)) {
+    const bool lockActive = inputActive(PIN_LOCK);
+    const bool shouldTurnOff = keyless.ignitionOwned && bike.ignitionOn && !lockActive;
+    keyless.ignitionGranted = false;
+    keyless.ignitionOwned = false;
+    keyless.phoneDetected = false;
     keyless.firstDetectTime = 0;
-
-    // Phone lost
-    if (keyless.phoneDetected) {
-      if (now - keyless.lastDetectTime >= KEYLESS_LOST_TIMEOUT_MS) {
-        keyless.phoneDetected = false;
-        // If engine was never running, lock immediately
-        if (!keyless.engineWasRunning) {
-          keyless.ignitionGranted = false;
-          LOG_I("Keyless: phone lost – locked (engine never ran)");
-        }
-        // If engine was running, grace period is handled by engineOff
-      }
+    keyless.sessionStartMs = 0;
+    keyless.sessionExpiryMs = 0;
+    keyless.autoScanActive = false;
+    keyless.sessionRefreshScan = false;
+    keyless.autoScanExtended = false;
+    if (shouldTurnOff) {
+      keyless.requestIgnitionOff = true;
+      LOG_I("Keyless: session expired -> ignition OFF requested");
+    } else {
+      LOG_I("Keyless: session expired (manual lock active=%d)", lockActive ? 1 : 0);
     }
+    return;
   }
 
-  // Track if engine was running during this unlock cycle
-  if (keyless.ignitionGranted && bike.engineRunning) {
-    keyless.engineWasRunning = true;
-  }
-
-  // Grace period countdown
-  if (keyless.graceActive) {
-    unsigned long graceMs = (unsigned long)keyless.graceSeconds * 1000UL;
-    if (now - keyless.graceStart >= graceMs) {
-      keyless.graceActive = false;
-      keyless.ignitionGranted = false;
-      keyless.engineWasRunning = false;
-      LOG_I("Keyless: grace period expired – locked");
-    }
-    // If engine restarts during grace, cancel grace
-    if (bike.engineRunning) {
-      keyless.graceActive = false;
-      keyless.engineWasRunning = true;
-      LOG_I("Keyless: engine restarted during grace");
+  if (now - keyless.lastRefreshScanTime >= KEYLESS_REFRESH_SCAN_INTERVAL_MS) {
+    keyless.lastRefreshScanTime = now;
+    if (tryStartAutoScan(KEYLESS_REFRESH_SCAN_SECONDS, true, false)) {
+      LOG_D("Keyless: refresh scan started");
     }
   }
-
 }
 
 bool bleKeylessIgnitionAllowed() {
   return keyless.ignitionGranted;
 }
 
-void bleKeylessEngineOff() {
-  if (!keyless.enabled || !keyless.ignitionGranted) return;
-  if (!keyless.engineWasRunning) return;
+bool bleKeylessTakeIgnitionOnRequest() {
+  const bool requested = keyless.requestIgnitionOn;
+  keyless.requestIgnitionOn = false;
+  return requested;
+}
 
-  // Engine was running and now stopped → start grace period
-  if (!keyless.graceActive && !keyless.phoneDetected) {
-    keyless.graceActive = true;
-    keyless.graceStart = millis();
-    LOG_I("Keyless: engine off – %ds grace period", keyless.graceSeconds);
-  }
+bool bleKeylessTakeIgnitionOffRequest() {
+  const bool requested = keyless.requestIgnitionOff;
+  keyless.requestIgnitionOff = false;
+  return requested;
 }
 
 // ============================================================================
 // KEYLESS: CONFIGURATION
 // ============================================================================
 
-void bleKeylessConfigure(bool enabled, int rssiThreshold, int graceSeconds) {
+void bleKeylessConfigure(bool enabled,
+                         int rssiLevelOrLegacyDbm,
+                         int activeMinutesOrLegacySeconds,
+                         int activationMode,
+                         int activationButton) {
   keyless.enabled = enabled;
-  keyless.rssiThreshold = constrain(rssiThreshold, -90, -30);
-  keyless.graceSeconds = constrain(graceSeconds, 5, 60);
+  if (rssiLevelOrLegacyDbm >= KEYLESS_RSSI_LEVEL_MIN
+      && rssiLevelOrLegacyDbm <= KEYLESS_RSSI_LEVEL_MAX) {
+    applyRssiLevel(rssiLevelOrLegacyDbm);
+  } else {
+    // Backward compatibility for older clients that still send dBm.
+    applyRssiLevel(rssiLevelForThreshold(rssiLevelOrLegacyDbm));
+  }
+  if (activeMinutesOrLegacySeconds > KEYLESS_ACTIVE_MINUTES_OPTIONS[KEYLESS_ACTIVE_MINUTES_OPTION_COUNT - 1]) {
+    keyless.activeMinutes = activeMinutesFromLegacySeconds(activeMinutesOrLegacySeconds);
+  } else {
+    keyless.activeMinutes = normalizeActiveMinutes(activeMinutesOrLegacySeconds);
+  }
+  keyless.activationMode = normalizeActivationMode(activationMode);
+  keyless.activationButton = normalizeActivationButton(activationButton);
   saveKeylessConfig();
-  LOG_I("Keyless config: enabled=%d rssi=%d grace=%ds",
-        enabled, rssiThreshold, graceSeconds);
+  LOG_I("Keyless config: enabled=%d level=%d threshold=%d dBm active=%d min trigger=%s/%u",
+        enabled, keyless.rssiLevel, keyless.rssiThreshold, keyless.activeMinutes,
+        keyless.activationMode == KEYLESS_ACTIVATION_MODE_SELECTED ? "selected" : "any",
+        keyless.activationButton);
 }
 
 // ============================================================================
@@ -573,16 +966,25 @@ void bleStartScan() {
   if (keyless.pScan->isScanning()) {
     keyless.pScan->stop();
   }
+  keyless.autoScanActive = false;
+  keyless.sessionRefreshScan = false;
+  keyless.autoScanExtended = false;
   scanResultCount = 0;
   scanResultsReady = false;
   keyless.scanActive = true;
-  keyless.pScan->start(10, onScanComplete, false);  // 10s active scan
-  LOG_I("BLE scan started (10s, threshold=%d, paired=%d)",
-        keyless.rssiThreshold, keyless.pairedCount);
+  keyless.pScan->start(12, onScanComplete, false);  // 12s active scan
+  LOG_I("BLE scan started (12s, lvl=%d, threshold=%d dBm, paired=%d, active=%d)",
+        keyless.rssiLevel,
+        keyless.rssiThreshold,
+        keyless.pairedCount,
+        keyless.pScan->isScanning() ? 1 : 0);
 }
 
 void bleStopScan() {
   keyless.scanActive = false;
+  keyless.autoScanActive = false;
+  keyless.sessionRefreshScan = false;
+  keyless.autoScanExtended = false;
   if (keyless.pScan && keyless.pScan->isScanning()) {
     keyless.pScan->stop();
   }
@@ -668,19 +1070,27 @@ void bleRemovePaired(const char* macStr) {
 // ============================================================================
 
 void bleKeylessBuildJson(JsonDocument& doc) {
+  const unsigned long now = millis();
   doc["type"] = "keyless";
   doc["enabled"] = keyless.enabled;
+  doc["rssiLevel"] = keyless.rssiLevel;
+  doc["rssiThresholdDbm"] = keyless.rssiThreshold;
   doc["rssiThreshold"] = keyless.rssiThreshold;
-  doc["graceSeconds"] = keyless.graceSeconds;
+  doc["activeMinutes"] = keyless.activeMinutes;
+  doc["activationMode"] = keyless.activationMode;
+  doc["activationButton"] = keyless.activationButton;
+  doc["sessionActive"] = keyless.ignitionGranted;
+  doc["sessionRemaining"] = sessionRemainingSeconds(now);
+  doc["nextScanIn"] = nextAutoScanInSeconds(now);
+  doc["autoSearching"] = keyless.autoScanActive;
+  doc["sessionRefreshSearching"] = keyless.autoScanActive && keyless.sessionRefreshScan;
   doc["phoneDetected"] = keyless.phoneDetected;
-  doc["graceActive"] = keyless.graceActive;
-
-  if (keyless.graceActive) {
-    unsigned long elapsed = millis() - keyless.graceStart;
-    unsigned long totalMs = (unsigned long)keyless.graceSeconds * 1000UL;
-    int remaining = (int)((totalMs - min(elapsed, totalMs)) / 1000UL);
-    doc["graceRemaining"] = remaining;
-  }
+  doc["statusDetected"] = keyless.statusDetected;
+  doc["waitingForButton"] = keyless.ignitionGranted && !bike.ignitionOn;
+  // Backward compatibility fields for older web clients.
+  doc["graceSeconds"] = keyless.activeMinutes * 60;
+  doc["graceActive"] = false;
+  doc["graceRemaining"] = 0;
 
   // Current RSSI of best paired device
   int bestRssi = -127;

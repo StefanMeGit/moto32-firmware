@@ -30,12 +30,13 @@ void outputsInitPWM() {
   // Brake light PWM (for BRAKE_FADE mode + rear light dimming)
   ledcSetup(PWM_CHANNEL_BRAKE, PWM_FREQ_HZ, PWM_RESOLUTION_BITS);
 
-  // Position light PWM
+  // Low beam / position light PWM
   ledcSetup(PWM_CHANNEL_POSITION, PWM_FREQ_HZ, PWM_RESOLUTION_BITS);
 
-  // Turn signal PWM (for mo.wave sequential animation)
-  ledcSetup(PWM_CHANNEL_TURNL, PWM_FREQ_HZ, PWM_RESOLUTION_BITS);
-  ledcSetup(PWM_CHANNEL_TURNR, PWM_FREQ_HZ, PWM_RESOLUTION_BITS);
+  // Additional dimmable light channels (DRL)
+  ledcSetup(PWM_CHANNEL_HIBEAM, PWM_FREQ_HZ, PWM_RESOLUTION_BITS);
+  ledcSetup(PWM_CHANNEL_AUX1, PWM_FREQ_HZ, PWM_RESOLUTION_BITS);
+  ledcSetup(PWM_CHANNEL_AUX2, PWM_FREQ_HZ, PWM_RESOLUTION_BITS);
 }
 
 // ============================================================================
@@ -69,10 +70,12 @@ void outputPWM(int pin, uint8_t duty) {
     channel = PWM_CHANNEL_BRAKE;
   } else if (pin == PIN_LIGHT_OUT) {
     channel = PWM_CHANNEL_POSITION;
-  } else if (pin == PIN_TURNL_OUT) {
-    channel = PWM_CHANNEL_TURNL;
-  } else if (pin == PIN_TURNR_OUT) {
-    channel = PWM_CHANNEL_TURNR;
+  } else if (pin == PIN_HIBEAM_OUT) {
+    channel = PWM_CHANNEL_HIBEAM;
+  } else if (pin == PIN_AUX1_OUT) {
+    channel = PWM_CHANNEL_AUX1;
+  } else if (pin == PIN_AUX2_OUT) {
+    channel = PWM_CHANNEL_AUX2;
   } else {
     // Unsupported pin for PWM – fall back to on/off
     if (duty > 127) outputOn(pin);

@@ -117,6 +117,49 @@ body.advanced-mode{
 }
 body.advanced-mode .mode-banner{display:block}
 
+/* ─── Home / Landing ─── */
+.home-hero{
+  background:radial-gradient(circle at top right,rgba(0,230,138,.14),transparent 52%),
+             linear-gradient(145deg,#0f2034 0%,#0b1725 100%);
+}
+.home-greeting{
+  font-size:1.25rem;font-weight:700;line-height:1.3;
+}
+.home-bike{
+  margin-top:6px;font-size:.92rem;color:var(--muted);
+}
+.home-meta{
+  margin-top:14px;display:flex;gap:14px;flex-wrap:wrap;
+  font-size:.78rem;color:var(--dim);
+}
+.home-meta strong{
+  font-family:'JetBrains Mono',monospace;color:var(--text);font-weight:700;
+}
+.home-summary{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;
+}
+.home-stat{
+  background:var(--bg);border:1px solid var(--border);border-radius:10px;
+  padding:10px 11px;
+}
+.home-stat .k{
+  font-size:.68rem;letter-spacing:.35px;color:var(--dim);
+  font-family:'JetBrains Mono',monospace;text-transform:uppercase;
+  display:flex;align-items:center;gap:6px;
+}
+.home-stat .k .icon{
+  font-size:.92rem;line-height:1;
+}
+.home-stat .v{
+  margin-top:6px;font-size:.95rem;font-weight:600;color:var(--text);
+}
+@media(max-width:700px){
+  .home-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:420px){
+  .home-summary{grid-template-columns:1fr}
+}
+
 /* ─── Cards ─── */
 .card{
   background:linear-gradient(170deg,var(--panel) 0%,var(--bg2) 100%);
@@ -131,6 +174,18 @@ body.advanced-mode .mode-banner{display:block}
 .card-title::before{
   content:'';width:3px;height:14px;border-radius:2px;
   background:var(--accent);flex-shrink:0;
+}
+.card-title .info-btn{
+  margin-left:auto;
+  width:18px;height:18px;border-radius:50%;
+  border:1px solid var(--border2);
+  background:var(--bg);color:var(--muted);
+  font-family:'JetBrains Mono',monospace;font-size:.66rem;font-weight:700;
+  display:inline-flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:.2s;
+}
+.card-title .info-btn:hover{
+  color:var(--accent);border-color:var(--accent);
 }
 
 /* ─── Grid layouts ─── */
@@ -168,14 +223,19 @@ body.advanced-mode .mode-banner{display:block}
 }
 .io-tile .pin{
   font-family:'JetBrains Mono',monospace;font-size:.65rem;
-  color:var(--dim);margin-left:auto;
+  color:var(--dim);margin-left:auto;display:none;
 }
+body.advanced-mode .io-tile .pin{display:inline}
 .io-tile .val{
   font-family:'JetBrains Mono',monospace;font-size:1.15rem;
   font-weight:700;color:var(--off);
 }
 .io-tile.active .val{color:var(--on)}
 .io-tile .sub{font-size:.7rem;color:var(--dim);font-family:'JetBrains Mono',monospace}
+.io-tile.manual-forced{
+  border-color:rgba(255,194,70,.7);
+  box-shadow:0 0 14px rgba(255,194,70,.18);
+}
 .status-dot{
   width:7px;height:7px;border-radius:50%;
   background:var(--off);flex-shrink:0;transition:.25s;
@@ -213,13 +273,18 @@ body.advanced-mode .mode-banner{display:block}
   background:transparent;color:var(--muted);transition:.2s;
 }
 .mode-btn.active{background:var(--accent);color:#05080d}
-select,input[type=number]{
+.adv-hold-hint{
+  margin-top:8px;font-size:.72rem;color:var(--warn);
+  font-family:'JetBrains Mono',monospace;display:none;
+}
+body.advanced-mode .adv-hold-hint{display:block}
+select,input[type=number],input[type=text]{
   font-family:'JetBrains Mono',monospace;font-size:.82rem;
   background:var(--bg);border:1px solid var(--border);
   border-radius:6px;padding:8px 12px;color:var(--text);
   outline:none;min-width:140px;transition:.2s;
 }
-select:focus,input[type=number]:focus{border-color:var(--accent)}
+select:focus,input[type=number]:focus,input[type=text]:focus{border-color:var(--accent)}
 select option{background:var(--panel);color:var(--text)}
 
 /* Toggle switch */
@@ -315,18 +380,76 @@ select option{background:var(--panel);color:var(--text)}
 .toast.success{border-color:var(--accent);color:var(--accent)}
 .toast.error{border-color:var(--danger);color:var(--danger)}
 
+/* ─── Info Overlay ─── */
+.info-overlay{
+  position:fixed;inset:0;z-index:1200;
+  display:none;align-items:center;justify-content:center;
+  background:rgba(3,7,12,.82);
+  backdrop-filter:blur(6px);
+  padding:16px;
+}
+.info-overlay.show{display:flex}
+.info-overlay-panel{
+  width:min(760px,100%);
+  max-height:85vh;overflow:auto;
+  background:linear-gradient(165deg,var(--panel2) 0%,var(--panel) 100%);
+  border:1px solid var(--border2);border-radius:14px;
+  box-shadow:0 20px 70px rgba(0,0,0,.55);
+  padding:18px 18px 14px;
+}
+.info-overlay-title{
+  font-size:.9rem;font-weight:700;letter-spacing:.4px;
+  color:var(--accent);text-transform:uppercase;
+  margin-bottom:10px;
+}
+.info-overlay-body{
+  font-size:.84rem;line-height:1.65;color:var(--text);
+  white-space:pre-line;
+}
+.info-overlay-hint{
+  margin-top:12px;font-size:.72rem;color:var(--dim);
+  font-family:'JetBrains Mono',monospace;
+}
+
+/* ─── Onboarding Overlay ─── */
+.onboarding-overlay{
+  position:fixed;inset:0;z-index:1400;display:none;
+  align-items:center;justify-content:center;
+  background:rgba(4,8,14,.88);backdrop-filter:blur(6px);
+  padding:16px;
+}
+.onboarding-overlay.show{display:flex}
+.onboarding-panel{
+  width:min(560px,100%);
+  background:linear-gradient(165deg,var(--panel2) 0%,var(--panel) 100%);
+  border:1px solid var(--border2);border-radius:14px;
+  box-shadow:0 20px 70px rgba(0,0,0,.6);
+  padding:18px;
+}
+.onboarding-title{
+  font-size:1.05rem;font-weight:700;margin-bottom:8px;color:var(--accent);
+}
+.onboarding-desc{
+  font-size:.82rem;color:var(--muted);line-height:1.6;margin-bottom:10px;
+}
+
 /* ─── Footer ─── */
 .footer{
   text-align:center;padding:30px 20px;font-size:.72rem;color:var(--dim);
   font-family:'JetBrains Mono',monospace;
 }
+.footer a{
+  color:var(--accent);
+  text-decoration:none;
+}
+.footer a:hover{text-decoration:underline}
 </style>
 </head>
 <body>
 
 <!-- ═══ Header ═══ -->
 <div class="header">
-  <div class="logo">MOTO32<span>v2.1 Dashboard</span></div>
+  <div class="logo">MOTO32<span>v0.1 Alpha Dashboard</span></div>
   <div class="header-right">
     <div class="conn-stack">
       <div class="conn-title">MOTO32</div>
@@ -347,16 +470,49 @@ select option{background:var(--panel);color:var(--text)}
 
 <!-- ═══ Tabs ═══ -->
 <div class="tabs">
-  <button class="tab active" data-tab="diag" data-i18n="tab_diag"></button>
+  <button class="tab active" data-tab="home" data-i18n="tab_home"></button>
+  <button class="tab" data-tab="diag" data-i18n="tab_diag"></button>
   <button class="tab" data-tab="settings" data-i18n="tab_settings"></button>
   <button class="tab" data-tab="ble" data-i18n="tab_ble"></button>
 </div>
 <div class="mode-banner" id="modeBanner">ADVANCED MODE ACTIVE</div>
 
 <!-- ══════════════════════════════════════════════════ -->
+<!-- TAB: HOME                                          -->
+<!-- ══════════════════════════════════════════════════ -->
+<div class="tab-content active" id="tab-home">
+  <div class="card home-hero">
+    <div class="home-greeting" id="homeGreeting">Hello Rider</div>
+    <div class="home-bike" id="homeBike">Bike profile not configured yet.</div>
+    <div class="home-meta">
+      <span><span data-i18n="home_fw"></span> <strong id="homeFirmware">--</strong></span>
+      <span><span data-i18n="home_mode"></span> <strong id="homeMode">BASIC</strong></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title" data-i18n="card_home_status"></div>
+    <div class="home-summary">
+      <div class="home-stat">
+        <div class="k"><span class="icon">&#9889;</span><span data-i18n="home_voltage"></span></div>
+        <div class="v" id="homeVoltage">--.- V</div>
+      </div>
+      <div class="home-stat">
+        <div class="k"><span class="icon">&#128273;</span><span data-i18n="home_ignition"></span></div>
+        <div class="v" id="homeIgnition">--</div>
+      </div>
+      <div class="home-stat">
+        <div class="k"><span class="icon">&#127949;</span><span data-i18n="home_engine"></span></div>
+        <div class="v" id="homeEngine">--</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════ -->
 <!-- TAB: DIAGNOSTICS                                   -->
 <!-- ══════════════════════════════════════════════════ -->
-<div class="tab-content active" id="tab-diag">
+<div class="tab-content" id="tab-diag">
 
   <!-- Battery & System -->
   <div class="card">
@@ -411,7 +567,10 @@ select option{background:var(--panel);color:var(--text)}
 
   <!-- Language -->
   <div class="card">
-    <div class="card-title" data-i18n="card_language"></div>
+    <div class="card-title">
+      <span data-i18n="card_language"></span>
+      <button class="info-btn" type="button" data-info-i18n="info_language" onclick="showInfo(this.dataset.infoI18n)">i</button>
+    </div>
     <div class="setting-row">
       <div class="setting-label">
         <div class="name" data-i18n="set_language_name"></div>
@@ -424,9 +583,41 @@ select option{background:var(--panel);color:var(--text)}
     </div>
   </div>
 
+  <!-- Rider & Bike Profile -->
+  <div class="card">
+    <div class="card-title">
+      <span data-i18n="card_profile"></span>
+      <button class="info-btn" type="button" data-info-i18n="info_profile" onclick="showInfo(this.dataset.infoI18n)">i</button>
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="name" data-i18n="set_driver_name"></div>
+        <div class="desc" data-i18n="set_driver_desc"></div>
+      </div>
+      <input type="text" id="s_driverName" maxlength="23" autocomplete="name">
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="name" data-i18n="set_brand_name"></div>
+        <div class="desc" data-i18n="set_brand_desc"></div>
+      </div>
+      <input type="text" id="s_bikeBrand" maxlength="23" autocomplete="organization">
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="name" data-i18n="set_model_name"></div>
+        <div class="desc" data-i18n="set_model_desc"></div>
+      </div>
+      <input type="text" id="s_bikeModel" maxlength="23" autocomplete="off">
+    </div>
+  </div>
+
   <!-- Operation Mode -->
   <div class="card">
-    <div class="card-title" data-i18n="card_mode"></div>
+    <div class="card-title">
+      <span data-i18n="card_mode"></span>
+      <button class="info-btn" type="button" data-info-i18n="info_mode" onclick="showInfo(this.dataset.infoI18n)">i</button>
+    </div>
     <div class="setting-row">
       <div class="setting-label">
         <div class="name" data-i18n="set_mode_name"></div>
@@ -437,11 +628,15 @@ select option{background:var(--panel);color:var(--text)}
         <button class="mode-btn" id="btnModeAdvanced" data-i18n="mode_advanced" onclick="setControlMode('advanced')"></button>
       </div>
     </div>
+    <div class="adv-hold-hint" id="advHoldHint" data-i18n="adv_hold_hint"></div>
   </div>
 
   <!-- Handlebar -->
   <div class="card">
-    <div class="card-title" data-i18n="card_handlebar"></div>
+    <div class="card-title">
+      <span data-i18n="card_handlebar"></span>
+      <button class="info-btn" type="button" data-info-i18n="info_handlebar" onclick="showInfo(this.dataset.infoI18n)">i</button>
+    </div>
     <div class="setting-row">
       <div class="setting-label">
         <div class="name" data-i18n="set_handlebar_name"></div>
@@ -453,7 +648,10 @@ select option{background:var(--panel);color:var(--text)}
 
   <!-- Lights -->
   <div class="card">
-    <div class="card-title" data-i18n="card_lights"></div>
+    <div class="card-title">
+      <span data-i18n="card_lights"></span>
+      <button class="info-btn" type="button" data-info-i18n="info_lights" onclick="showInfo(this.dataset.infoI18n)">i</button>
+    </div>
     <div class="setting-row">
       <div class="setting-label">
         <div class="name" data-i18n="set_rear_name"></div>
@@ -482,11 +680,28 @@ select option{background:var(--panel);color:var(--text)}
       </div>
       <select id="s_parking"></select>
     </div>
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="name" data-i18n="set_drl_source_name"></div>
+        <div class="desc" data-i18n="set_drl_source_desc"></div>
+      </div>
+      <select id="s_drlSource"></select>
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="name" data-i18n="set_drl_dim_name"></div>
+        <div class="desc" data-i18n="set_drl_dim_desc"></div>
+      </div>
+      <select id="s_drlDim"></select>
+    </div>
   </div>
 
   <!-- Turn Signals -->
   <div class="card">
-    <div class="card-title" data-i18n="card_turn"></div>
+    <div class="card-title">
+      <span data-i18n="card_turn"></span>
+      <button class="info-btn" type="button" data-info-i18n="info_turn" onclick="showInfo(this.dataset.infoI18n)">i</button>
+    </div>
     <div class="setting-row">
       <div class="setting-label">
         <div class="name" data-i18n="set_turnoff_name"></div>
@@ -509,18 +724,14 @@ select option{background:var(--panel);color:var(--text)}
       </div>
       <button class="btn" id="btnTurnCal" onclick="toggleTurnDistanceCalibration()"></button>
     </div>
-    <div class="setting-row">
-      <div class="setting-label">
-        <div class="name" data-i18n="set_wave_name"></div>
-        <div class="desc" data-i18n="set_wave_desc"></div>
-      </div>
-      <label class="toggle"><input type="checkbox" id="s_wave"><span class="slider"></span></label>
-    </div>
   </div>
 
   <!-- Brake Light -->
   <div class="card">
-    <div class="card-title" data-i18n="card_brake"></div>
+    <div class="card-title">
+      <span data-i18n="card_brake"></span>
+      <button class="info-btn" type="button" data-info-i18n="info_brake" onclick="showInfo(this.dataset.infoI18n)">i</button>
+    </div>
     <div class="setting-row">
       <div class="setting-label">
         <div class="name" data-i18n="set_brakemode_name"></div>
@@ -532,7 +743,10 @@ select option{background:var(--panel);color:var(--text)}
 
   <!-- Safety -->
   <div class="card">
-    <div class="card-title" data-i18n="card_safety"></div>
+    <div class="card-title">
+      <span data-i18n="card_safety"></span>
+      <button class="info-btn" type="button" data-info-i18n="info_safety" onclick="showInfo(this.dataset.infoI18n)">i</button>
+    </div>
     <div class="setting-row">
       <div class="setting-label">
         <div class="name" data-i18n="set_standkill_name"></div>
@@ -551,7 +765,10 @@ select option{background:var(--panel);color:var(--text)}
 
   <!-- AUX -->
   <div class="card">
-    <div class="card-title" data-i18n="card_aux"></div>
+    <div class="card-title">
+      <span data-i18n="card_aux"></span>
+      <button class="info-btn" type="button" data-info-i18n="info_aux" onclick="showInfo(this.dataset.infoI18n)">i</button>
+    </div>
     <div class="setting-row">
       <div class="setting-label">
         <div class="name" data-i18n="set_aux1_name"></div>
@@ -615,7 +832,10 @@ select option{background:var(--panel);color:var(--text)}
 
   <!-- Keyless Settings -->
   <div class="card" style="margin-top:16px">
-    <div class="card-title" data-i18n="card_keyless_settings"></div>
+    <div class="card-title">
+      <span data-i18n="card_keyless_settings"></span>
+      <button class="info-btn" type="button" data-info-i18n="info_keyless_settings" onclick="showInfo(this.dataset.infoI18n)">i</button>
+    </div>
     <div class="setting-row">
       <div class="setting-label">
         <div class="name" data-i18n="set_keyless_en_name"></div>
@@ -627,23 +847,76 @@ select option{background:var(--panel);color:var(--text)}
       <div class="setting-label">
         <div class="name" data-i18n="set_rssi_name"></div>
         <div class="desc" data-i18n="set_rssi_desc"></div>
+        <div id="rssiLevelInfo" style="font-size:.72rem;color:var(--dim);margin-top:4px"></div>
       </div>
-      <input type="number" id="s_rssiThresh" value="-65" min="-90" max="-30" onchange="sendKeylessConfig()">
+      <select id="s_rssiLevel" onchange="updateRssiLevelUi();sendKeylessConfig()"></select>
     </div>
     <div class="setting-row">
       <div class="setting-label">
-        <div class="name" data-i18n="set_grace_name"></div>
-        <div class="desc" data-i18n="set_grace_desc"></div>
+        <div class="name" data-i18n="set_active_name"></div>
+        <div class="desc" data-i18n="set_active_desc"></div>
       </div>
-      <input type="number" id="s_graceTime" value="10" min="5" max="60" onchange="sendKeylessConfig()">
+      <select id="s_activeTime" onchange="sendKeylessConfig()"></select>
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="name" data-i18n="set_act_mode_name"></div>
+        <div class="desc" data-i18n="set_act_mode_desc"></div>
+      </div>
+      <select id="s_actMode" onchange="updateKeylessActivationUi();sendKeylessConfig()"></select>
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="name" data-i18n="set_act_button_name"></div>
+        <div class="desc" data-i18n="set_act_button_desc"></div>
+      </div>
+      <select id="s_actButton" onchange="sendKeylessConfig()"></select>
     </div>
   </div>
 </div>
 
 <!-- ═══ Toast ═══ -->
 <div class="toast" id="toast"></div>
+<div class="info-overlay" id="infoOverlay" onclick="closeInfoOverlay()">
+  <div class="info-overlay-panel">
+    <div class="info-overlay-title" id="infoOverlayTitle"></div>
+    <div class="info-overlay-body" id="infoOverlayBody"></div>
+    <div class="info-overlay-hint" id="infoOverlayHint" data-i18n="info_overlay_hint"></div>
+  </div>
+</div>
+<div class="onboarding-overlay" id="profileOverlay">
+  <div class="onboarding-panel">
+    <div class="onboarding-title" data-i18n="profile_setup_title"></div>
+    <div class="onboarding-desc" data-i18n="profile_setup_desc"></div>
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="name" data-i18n="set_driver_name"></div>
+      </div>
+      <input type="text" id="onb_driverName" maxlength="23" autocomplete="name">
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="name" data-i18n="set_brand_name"></div>
+      </div>
+      <input type="text" id="onb_bikeBrand" maxlength="23" autocomplete="organization">
+    </div>
+    <div class="setting-row">
+      <div class="setting-label">
+        <div class="name" data-i18n="set_model_name"></div>
+      </div>
+      <input type="text" id="onb_bikeModel" maxlength="23" autocomplete="off">
+    </div>
+    <div class="btn-row" style="justify-content:flex-end">
+      <button class="btn" type="button" onclick="skipProfileOnboarding()" data-i18n="btn_profile_skip"></button>
+      <button class="btn primary" type="button" onclick="saveProfileOnboarding()" data-i18n="btn_profile_save"></button>
+    </div>
+  </div>
+</div>
 
-<div class="footer">MOTO32 OPEN SOURCE &middot; ESP32-WROOM-32D &middot; MIT LICENSE</div>
+<div class="footer">
+  MOTO32 OPEN SOURCE &middot; ESP32-WROOM-32D &middot; MIT LICENSE &middot;
+  <a href="https://github.com/StefanMeGit/moto32-firmware/" target="_blank" rel="noopener noreferrer">GitHub Repo</a>
+</div>
 
 <!-- ══════════════════════════════════════════════════ -->
 <!-- JAVASCRIPT                                         -->
@@ -656,6 +929,7 @@ select option{background:var(--panel);color:var(--text)}
 const LANG = {
   en: {
     // Tabs
+    tab_home: '\ud83c\udfe0 Home',
     tab_diag: '\u26a1 Diagnostics',
     tab_settings: '\u2699 Settings',
     tab_ble: '\ud83d\udd11 BLE Keyless',
@@ -671,6 +945,29 @@ const LANG = {
     ws_connected: 'WebSocket connected',
     ble_connected: 'Connected',
     ble_disconnected: 'Disconnected',
+    ble_next_scan: 'Next scan in {sec}s',
+    ble_next_scan_na: 'Next scan: -',
+    ble_scanning: 'Scan running...',
+    info_overlay_hint: 'Tap anywhere on this overlay to close',
+
+    // Home
+    card_home_status: 'Device Overview',
+    home_fw: 'Firmware:',
+    home_mode: 'Mode:',
+    home_web: 'Web Link',
+    home_ble: 'BLE Detection',
+    home_ble_next: 'BLE Next Scan',
+    home_voltage: 'Voltage',
+    home_ignition: 'Ignition',
+    home_engine: 'Engine',
+    home_hello_driver: 'Hello, {driver}.',
+    home_hello_generic: 'Hello, Rider.',
+    home_bike_named: 'Bike: {brand} {model}',
+    home_bike_missing: 'Bike profile not configured yet.',
+    home_ble_detected: 'Detected',
+    home_ble_not_detected: 'Not detected',
+    state_on: 'ON',
+    state_off: 'OFF',
 
     // Diagnostics
     card_battery: 'Battery & System',
@@ -679,7 +976,8 @@ const LANG = {
     lbl_engine: 'Engine',
     card_inputs: 'Inputs',
     card_outputs: 'Outputs',
-    adv_outputs_hint: 'In ADVANCED mode, tap an output card to latch that output on/off.',
+    adv_outputs_hint: 'In ADVANCED mode, tap input/output cards to force states manually.',
+    adv_hold_hint: 'Tip and hold any input/output tile for 1 second to return it to normal mode.',
     adv_tap_toggle: 'Tap to toggle',
     card_log: 'Event Log',
 
@@ -700,6 +998,8 @@ const LANG = {
     // I/O labels
     io_active: 'Active',
     io_inactive: 'Inactive',
+    manual_on: 'MANUAL ON',
+    manual_off: 'MANUAL OFF',
 
     // Input names
     in_lock: 'Ignition Lock',
@@ -732,11 +1032,29 @@ const LANG = {
     card_language: 'Language',
     set_language_name: 'Dashboard Language',
     set_language_desc: 'Switch UI language for all labels and messages.',
+    info_language: 'This card changes only the dashboard language.\n- EN/DE switch is immediate.\n- No firmware behavior is changed.\n- Your selection is saved in the browser.',
+
+    card_profile: 'Rider & Bike Profile',
+    set_driver_name: 'Driver Name',
+    set_driver_desc: 'Name used for greeting on the home screen',
+    set_brand_name: 'Bike Brand',
+    set_brand_desc: 'Manufacturer (e.g. BMW, Ducati, Honda)',
+    set_model_name: 'Bike Model',
+    set_model_desc: 'Model (e.g. R nineT, Monster 1200)',
+    info_profile: 'Defines your personal landing profile.\n- Driver name is used in the greeting.\n- Brand + model build the bike name shown on Home.\n- First boot requires these fields before normal use.',
+    profile_setup_title: 'Initial Device Setup',
+    profile_setup_desc: 'Please enter rider and bike information before using the dashboard.',
+    profile_setup_required: 'Please fill driver, brand and model.',
+    profile_setup_done: 'Profile saved',
+    profile_setup_skipped: 'Profile setup skipped',
+    btn_profile_skip: 'Skip for now',
+    btn_profile_save: 'Save and Continue',
 
     // Settings - Handlebar
     card_mode: 'Operation Mode',
     set_mode_name: 'Control Level',
-    set_mode_desc: 'BASIC = safe display. ADVANCED = direct output toggling.',
+    set_mode_desc: 'BASIC = safe display. ADVANCED = direct input/output control.',
+    info_mode: 'Operation mode defines control permissions.\n- BASIC: monitor and configure settings only.\n- ADVANCED: manual forcing of inputs/outputs is allowed.\n- ADVANCED can bypass normal logic, so use it only for diagnostics and testing.',
 
     // Settings - Handlebar
     card_handlebar: 'Handlebar Configuration',
@@ -747,6 +1065,7 @@ const LANG = {
     opt_hbar_c: 'C \u2013 Japanese / European',
     opt_hbar_d: 'D \u2013 Ducati',
     opt_hbar_e: 'E \u2013 4 Pushbuttons',
+    info_handlebar: 'Select the physical switch-unit type so button presses are interpreted correctly.\n- A is default (5 pushbuttons).\n- B/C/D/E adapt mapping for other common layouts.\n- Wrong selection can cause unexpected button behavior.',
 
     // Settings - Lights
     card_lights: 'Lighting',
@@ -757,9 +1076,9 @@ const LANG = {
     opt_rear_2: 'Always On',
     set_lowbeam_name: 'Low Beam Mode',
     set_lowbeam_desc: 'When the low beam turns on',
-    opt_low_0: 'On at engine start',
-    opt_low_1: 'Manual',
-    opt_low_2: 'Daytime running light (always on)',
+    opt_low_0: 'Standard (button controlled)',
+    opt_low_1: 'Always on with ignition',
+    opt_low_2: 'Manual only',
     set_poslight_name: 'Position Light',
     set_poslight_desc: 'Brightness 0 (off) to 9 (50%)',
     set_parking_name: 'Parking Light',
@@ -768,6 +1087,20 @@ const LANG = {
     opt_park_1: 'Position light',
     opt_park_2: 'Left indicator',
     opt_park_3: 'Right indicator',
+    set_drl_source_name: 'Daytime Running Light',
+    set_drl_source_desc: 'Select light source for DRL while ignition is on',
+    opt_drlsrc_0: 'Off',
+    opt_drlsrc_1: 'Low Beam',
+    opt_drlsrc_2: 'High Beam',
+    opt_drlsrc_3: 'AUX 1',
+    opt_drlsrc_4: 'AUX 2',
+    set_drl_dim_name: 'DRL Brightness',
+    set_drl_dim_desc: 'Dim level for selected DRL source',
+    opt_drldim_25: '25%',
+    opt_drldim_50: '50%',
+    opt_drldim_75: '75%',
+    opt_drldim_100: '100%',
+    info_lights: 'LIGHTING CARD\n\n1) Tail Light Mode\n- Standard: brake output is only active while braking.\n- Dimmed: tail light is dim with ignition ON; braking still goes full brightness.\n- Always On: tail light output stays fully ON while ignition is ON.\n\n2) Low Beam Mode\n- Standard: controlled by normal button logic.\n- Always on with ignition: low beam is forced ON whenever ignition is ON.\n- Manual only: low beam changes only by manual input logic.\n\n3) Position Light\n- Range 0..9 (PWM).\n- 0 = off.\n- Higher values increase dim brightness when low beam is not active.\n\n4) Parking Light (Ignition OFF)\n- Off: no parking output.\n- Position light: dim low-beam channel as parking light.\n- Left/Right indicator: steady parking light on selected side.\n\n5) Daytime Running Light (DRL)\n- Source: Off, Low Beam, High Beam, AUX1, AUX2.\n- Brightness: 25%, 50%, 75%, 100%.\n- Active while ignition is ON (suppressed during starter engagement).',
 
     // Settings - Turn Signals
     card_turn: 'Turn Signals',
@@ -788,8 +1121,7 @@ const LANG = {
     turn_cal_running: 'Pulses captured: {pulses} (target preview: {target})',
     turn_cal_done: 'Calibration applied.',
     turn_cal_failed: 'No pulses detected. Try again.',
-    set_wave_name: 'mo.wave Animation',
-    set_wave_desc: 'Sequential turn signal effect',
+    info_turn: 'Turn-signal automation is configured here.\n- Auto-cancel can be disabled, time-based, or distance-based.\n- Distance mode uses speed pulses and target pulse count.\n- 10m calibration workflow: start, push bike 10m, confirm.',
 
     // Settings - Brake
     card_brake: 'Brake Light',
@@ -802,6 +1134,7 @@ const LANG = {
     opt_brake_4: '2x Flash \u2192 Continuous',
     opt_brake_5: '3s Continuous \u2192 Flash',
     opt_brake_6: 'Emergency braking (hazard)',
+    info_brake: 'Brake output pattern selection.\n- Continuous: always solid when braking.\n- PWM fade and flash modes: attention-grabbing warning patterns.\n- Emergency mode can trigger hazard behavior during hard braking.',
 
     // Settings - Safety
     card_safety: 'Safety',
@@ -820,6 +1153,7 @@ const LANG = {
     set_alarm_desc: 'Vibration sensor alarm in standby',
     opt_alarm_0: 'Disabled',
     opt_alarm_1: 'Enabled',
+    info_safety: 'Safety-related input behavior.\n- Sidestand/Kill combined setting defines NO/NC logic.\n- Alarm enables vibration-triggered warning while parked.\n- Verify wiring and logic carefully before road use.',
 
     // Settings - AUX
     card_aux: 'Auxiliary Outputs',
@@ -831,6 +1165,7 @@ const LANG = {
     opt_aux_1: 'On with engine',
     opt_aux_2: 'Manual',
     opt_aux_3: 'Disabled',
+    info_aux: 'AUX output strategies.\n- On with ignition.\n- On only with engine running.\n- Manual mode (via dashboard control).\n- Disabled.',
 
     // Buttons
     btn_save: '\ud83d\udcbe Save Settings',
@@ -839,15 +1174,20 @@ const LANG = {
 
     // BLE Keyless
     card_keyless: 'BLE Keyless Ignition',
-    keyless_desc: 'Pair a smartphone via BLE with the Moto32. When the paired phone is in range, the ignition is automatically activated. It stays on until the engine has run and been shut off. Within 10\u00a0seconds you can restart. After that, the phone must be detected again.',
+    keyless_desc: 'Pair a smartphone via BLE with the Moto32. Once detected, a timed keyless session is armed. Ignition switches on only after the configured button trigger. During the session the unit scans every 30 seconds and extends the timer when the phone is still in range.',
     keyless_inactive: 'Inactive',
     keyless_no_device: 'No device paired',
     keyless_disabled: 'Disabled',
     keyless_disabled_detail: 'Keyless function is turned off',
     keyless_unlocked: 'Unlocked',
-    keyless_unlocked_detail: 'Device detected ({rssi} dBm) \u2013 ignition granted',
-    keyless_grace: 'Grace Period',
-    keyless_grace_detail: '{sec}s remaining for restart',
+    keyless_unlocked_detail: 'Detected (L{level}, {rssi} dBm) \u2013 remaining {time}',
+    keyless_unlocked_time_only: 'Ignition granted \u2013 remaining {time}',
+    keyless_waiting_button: 'Ready',
+    keyless_waiting_button_detail: 'Phone detected. Press {button} to enable ignition.',
+    keyless_scan_active: 'Searching...',
+    keyless_scan_active_detail: 'Refresh scan running \u2013 remaining {time}',
+    keyless_searching: 'Searching',
+    keyless_searching_detail: 'Scanning for paired device...',
     keyless_locked: 'Locked',
     keyless_locked_detail: 'Waiting for phone detection\u2026',
 
@@ -866,10 +1206,32 @@ const LANG = {
     card_keyless_settings: 'Keyless Settings',
     set_keyless_en_name: 'Keyless Enabled',
     set_keyless_en_desc: 'BLE proximity detection for ignition',
-    set_rssi_name: 'RSSI Threshold',
-    set_rssi_desc: 'Signal strength for detection (typ. -70 to -50 dBm)',
-    set_grace_name: 'Grace Period',
-    set_grace_desc: 'Seconds after engine off during which restart is possible',
+    set_rssi_name: 'Signal Level Threshold',
+    set_rssi_desc: 'Select 1..6. Lower accepts weaker signal.',
+    set_rssi_live: 'Current threshold: Level {level} ({dbm} dBm)',
+    opt_rssi_1: '1 (very weak, -100 dBm)',
+    opt_rssi_2: '2 (-92 dBm)',
+    opt_rssi_3: '3 (-84 dBm)',
+    opt_rssi_4: '4 (-76 dBm)',
+    opt_rssi_5: '5 (-68 dBm)',
+    opt_rssi_6: '6 (strong, -60 dBm)',
+    set_active_name: 'Ignition Session',
+    set_active_desc: 'How long ignition stays active after phone detection',
+    opt_active_1: '1 min',
+    opt_active_5: '5 min',
+    opt_active_10: '10 min',
+    set_act_mode_name: 'Ignition Trigger',
+    set_act_mode_desc: 'How BLE keyless is allowed to switch ignition on',
+    opt_act_mode_any: 'Any button',
+    opt_act_mode_selected: 'Selected button',
+    set_act_button_name: 'Trigger Button',
+    set_act_button_desc: 'Used when "Selected button" is active',
+    opt_act_btn_start: 'Starter',
+    opt_act_btn_light: 'Light',
+    opt_act_btn_horn: 'Horn',
+    opt_act_btn_left: 'Turn Left',
+    opt_act_btn_right: 'Turn Right',
+    info_keyless_settings: 'BLE keyless control center.\n- Enable/disable keyless detection.\n- Set signal threshold level (1..6).\n- Define session runtime.\n- Choose ignition trigger logic (any button or selected button).',
 
     // Toast messages
     toast_saved: 'Settings saved',
@@ -886,6 +1248,7 @@ const LANG = {
   },
 
   de: {
+    tab_home: '\ud83c\udfe0 Start',
     tab_diag: '\u26a1 Diagnose',
     tab_settings: '\u2699 Einstellungen',
     tab_ble: '\ud83d\udd11 BLE Keyless',
@@ -900,6 +1263,28 @@ const LANG = {
     ws_connected: 'WebSocket verbunden',
     ble_connected: 'Verbunden',
     ble_disconnected: 'Getrennt',
+    ble_next_scan: 'N\u00e4chster Scan in {sec}s',
+    ble_next_scan_na: 'N\u00e4chster Scan: -',
+    ble_scanning: 'Scan l\u00e4uft...',
+    info_overlay_hint: 'Tippe auf das Overlay, um es zu schlie\u00dfen',
+
+    card_home_status: 'Ger\u00e4te\u00fcbersicht',
+    home_fw: 'Firmware:',
+    home_mode: 'Modus:',
+    home_web: 'Web-Verbindung',
+    home_ble: 'BLE-Erkennung',
+    home_ble_next: 'BLE N\u00e4chster Scan',
+    home_voltage: 'Spannung',
+    home_ignition: 'Z\u00fcndung',
+    home_engine: 'Motor',
+    home_hello_driver: 'Hallo, {driver}.',
+    home_hello_generic: 'Hallo Fahrer.',
+    home_bike_named: 'Bike: {brand} {model}',
+    home_bike_missing: 'Bike-Profil noch nicht konfiguriert.',
+    home_ble_detected: 'Erkannt',
+    home_ble_not_detected: 'Nicht erkannt',
+    state_on: 'AN',
+    state_off: 'AUS',
 
     card_battery: 'Batterie & System',
     lbl_voltage: 'Spannung',
@@ -907,7 +1292,8 @@ const LANG = {
     lbl_engine: 'Motor',
     card_inputs: 'Eing\u00e4nge',
     card_outputs: 'Ausg\u00e4nge',
-    adv_outputs_hint: 'Im ADVANCED-Modus schaltet ein Tipp auf eine Ausgangskarte den Ausgang dauerhaft ein/aus.',
+    adv_outputs_hint: 'Im ADVANCED-Modus kannst du Ein-/Ausgangskarten direkt manuell schalten.',
+    adv_hold_hint: 'Tippe und halte eine Ein-/Ausgangskarte 1 Sekunde, um sie in den Normalmodus zur\u00fcckzusetzen.',
     adv_tap_toggle: 'Tippen zum Schalten',
     card_log: 'Event Log',
 
@@ -925,6 +1311,8 @@ const LANG = {
 
     io_active: 'Aktiv',
     io_inactive: 'Inaktiv',
+    manual_on: 'MANUELL AN',
+    manual_off: 'MANUELL AUS',
 
     in_lock: 'Z\u00fcndschloss',
     in_turnL: 'Blinker L',
@@ -954,10 +1342,28 @@ const LANG = {
     card_language: 'Sprache',
     set_language_name: 'Dashboard-Sprache',
     set_language_desc: 'Stellt die Sprache aller Labels und Meldungen um.',
+    info_language: 'Diese Karte \u00e4ndert nur die Dashboard-Sprache.\n- EN/DE-Wechsel erfolgt sofort.\n- Das Firmware-Verhalten bleibt unver\u00e4ndert.\n- Die Auswahl wird im Browser gespeichert.',
+
+    card_profile: 'Fahrer- & Bike-Profil',
+    set_driver_name: 'Fahrername',
+    set_driver_desc: 'Wird als Begr\u00fc\u00dfung auf der Startseite angezeigt',
+    set_brand_name: 'Bike-Marke',
+    set_brand_desc: 'Hersteller (z. B. BMW, Ducati, Honda)',
+    set_model_name: 'Bike-Modell',
+    set_model_desc: 'Modell (z. B. R nineT, Monster 1200)',
+    info_profile: 'Definiert dein pers\u00f6nliches Startprofil.\n- Fahrername wird in der Begr\u00fc\u00dfung verwendet.\n- Marke + Modell bilden den Bike-Namen auf der Startseite.\n- Beim ersten Start sind diese Felder Pflicht.',
+    profile_setup_title: 'Erstkonfiguration',
+    profile_setup_desc: 'Bitte trage Fahrer- und Bike-Daten ein, bevor du das Dashboard nutzt.',
+    profile_setup_required: 'Bitte Fahrer, Marke und Modell ausf\u00fcllen.',
+    profile_setup_done: 'Profil gespeichert',
+    profile_setup_skipped: 'Profil-Setup \u00fcbersprungen',
+    btn_profile_skip: 'Jetzt \u00fcberspringen',
+    btn_profile_save: 'Speichern und Weiter',
 
     card_mode: 'Betriebsmodus',
     set_mode_name: 'Steuerstufe',
-    set_mode_desc: 'BASIC = sichere Anzeige. ADVANCED = direkte Ausgangssteuerung.',
+    set_mode_desc: 'BASIC = sichere Anzeige. ADVANCED = direkte Ein-/Ausgangssteuerung.',
+    info_mode: 'Der Betriebsmodus definiert die Berechtigungen.\n- BASIC: nur Monitoring und Einstellungen.\n- ADVANCED: manuelles Forcen von Ein-/Ausg\u00e4ngen ist erlaubt.\n- ADVANCED kann normale Logik umgehen, daher nur f\u00fcr Diagnose/Tests nutzen.',
 
     card_handlebar: 'Lenker-Konfiguration',
     set_handlebar_name: 'Lenkerarmatur',
@@ -967,6 +1373,7 @@ const LANG = {
     opt_hbar_c: 'C \u2013 Japan / Europa',
     opt_hbar_d: 'D \u2013 Ducati',
     opt_hbar_e: 'E \u2013 4 Taster',
+    info_handlebar: 'W\u00e4hlt den Typ der Schaltereinheit, damit Taster korrekt interpretiert werden.\n- A ist Standard (5 Taster).\n- B/C/D/E passen das Mapping f\u00fcr andere Layouts an.\n- Falsche Auswahl kann unerwartetes Tasterverhalten verursachen.',
 
     card_lights: 'Beleuchtung',
     set_rear_name: 'R\u00fccklicht-Modus',
@@ -976,9 +1383,9 @@ const LANG = {
     opt_rear_2: 'Immer an',
     set_lowbeam_name: 'Abblendlicht-Modus',
     set_lowbeam_desc: 'Wann schaltet das Abblendlicht ein',
-    opt_low_0: 'An bei Motorstart',
-    opt_low_1: 'Manuell',
-    opt_low_2: 'Tagfahrlicht (immer an)',
+    opt_low_0: 'Standard (per Taster)',
+    opt_low_1: 'Immer an mit Zündung',
+    opt_low_2: 'Nur manuell',
     set_poslight_name: 'Positionslicht',
     set_poslight_desc: 'Helligkeit 0 (aus) bis 9 (50%)',
     set_parking_name: 'Parkbeleuchtung',
@@ -987,6 +1394,20 @@ const LANG = {
     opt_park_1: 'Standlicht',
     opt_park_2: 'Blinker links',
     opt_park_3: 'Blinker rechts',
+    set_drl_source_name: 'Tagfahrlicht',
+    set_drl_source_desc: 'W\u00e4hle die Lichtquelle f\u00fcr DRL bei aktiver Z\u00fcndung',
+    opt_drlsrc_0: 'Aus',
+    opt_drlsrc_1: 'Abblendlicht',
+    opt_drlsrc_2: 'Fernlicht',
+    opt_drlsrc_3: 'AUX 1',
+    opt_drlsrc_4: 'AUX 2',
+    set_drl_dim_name: 'DRL-Helligkeit',
+    set_drl_dim_desc: 'Dimmstufe der gew\u00e4hlten DRL-Lichtquelle',
+    opt_drldim_25: '25%',
+    opt_drldim_50: '50%',
+    opt_drldim_75: '75%',
+    opt_drldim_100: '100%',
+    info_lights: 'BELEUCHTUNGS-KARTE\n\n1) R\u00fccklicht-Modus\n- Standard: Bremslicht-Ausgang ist nur beim Bremsen aktiv.\n- Gedimmt: R\u00fccklicht ist bei Z\u00fcndung EIN gedimmt aktiv; beim Bremsen volle Helligkeit.\n- Immer an: R\u00fccklicht-Ausgang ist bei Z\u00fcndung EIN dauerhaft voll aktiv.\n\n2) Abblendlicht-Modus\n- Standard: normale Taster-/Logiksteuerung.\n- Immer an mit Z\u00fcndung: Abblendlicht wird bei Z\u00fcndung EIN erzwungen.\n- Nur manuell: \u00c4nderung nur \u00fcber manuelle Eingangslogik.\n\n3) Positionslicht\n- Bereich 0..9 (PWM).\n- 0 = aus.\n- H\u00f6here Werte erh\u00f6hen die Dimmhelligkeit, wenn Abblendlicht nicht aktiv ist.\n\n4) Parkbeleuchtung (Z\u00fcndung AUS)\n- Aus: keine Parklicht-Ausgabe.\n- Standlicht: gedimmter Abblendlicht-Kanal als Parklicht.\n- Blinker links/rechts: dauerhaftes Parklicht auf der gew\u00e4hlten Seite.\n\n5) Tagfahrlicht (DRL)\n- Quelle: Aus, Abblendlicht, Fernlicht, AUX1, AUX2.\n- Helligkeit: 25%, 50%, 75%, 100%.\n- Aktiv bei Z\u00fcndung EIN (w\u00e4hrend Starterlauf unterdr\u00fcckt).',
 
     card_turn: 'Blinker',
     set_turnoff_name: 'Auto-Abschaltung',
@@ -1006,8 +1427,7 @@ const LANG = {
     turn_cal_running: 'Erfasste Pulse: {pulses} (Zielvorschau: {target})',
     turn_cal_done: 'Kalibrierung \u00fcbernommen.',
     turn_cal_failed: 'Keine Pulse erkannt. Bitte erneut versuchen.',
-    set_wave_name: 'mo.wave Animation',
-    set_wave_desc: 'Laufender Blinker-Effekt',
+    info_turn: 'Einstellungen f\u00fcr die automatische Blinker-Abschaltung.\n- Auto-Abschaltung kann deaktiviert, zeit- oder streckenbasiert sein.\n- Streckenmodus nutzt Geschwindigkeitspulse und einen Zielwert.\n- 10m-Kalibrierung: starten, Motorrad 10m schieben, best\u00e4tigen.',
 
     card_brake: 'Bremslicht',
     set_brakemode_name: 'Bremslicht-Modus',
@@ -1019,6 +1439,7 @@ const LANG = {
     opt_brake_4: '2\u00d7 Blitzen \u2192 Dauer',
     opt_brake_5: '3s Dauer \u2192 Blitzen',
     opt_brake_6: 'Notbremsung (Warnblinker)',
+    info_brake: 'Auswahl des Bremslicht-Musters.\n- Dauerlicht: stabil bei Bremsen.\n- PWM-Fade/Blitzmodi: erh\u00f6hte Sichtbarkeit.\n- Notbremsmodus kann Warnblinker bei starker Bremsung aktivieren.',
 
     card_safety: 'Sicherheit',
     set_standkill_name: 'Seitenst\u00e4nder / Kill-Switch',
@@ -1036,6 +1457,7 @@ const LANG = {
     set_alarm_desc: 'Ersch\u00fctterungssensor-Alarm im Standby',
     opt_alarm_0: 'Deaktiviert',
     opt_alarm_1: 'Aktiviert',
+    info_safety: 'Sicherheitsrelevante Eingangslogik.\n- Kombinierte Einstellung f\u00fcr Seitenst\u00e4nder/Kill (NO/NC).\n- Alarm aktiviert Ersch\u00fctterungserkennung im Stand.\n- Vor Stra\u00dfennutzung Verdrahtung und Logik zwingend pr\u00fcfen.',
 
     card_aux: 'Zusatzausg\u00e4nge',
     set_aux1_name: 'AUX 1 Modus',
@@ -1046,21 +1468,27 @@ const LANG = {
     opt_aux_1: 'An bei Motor',
     opt_aux_2: 'Manuell',
     opt_aux_3: 'Deaktiviert',
+    info_aux: 'AUX-Ausgangsstrategien.\n- An bei Z\u00fcndung.\n- An nur bei laufendem Motor.\n- Manueller Modus (per Dashboard).\n- Deaktiviert.',
 
     btn_save: '\ud83d\udcbe Einstellungen speichern',
     btn_reload: '\ud83d\udd04 Neu laden',
     btn_factory: '\u26a0 Werkseinstellungen',
 
     card_keyless: 'BLE Keyless-Z\u00fcndung',
-    keyless_desc: 'Verbinde ein Smartphone per BLE mit der Moto32. Wenn das angelernte Handy in Reichweite ist, wird die Z\u00fcndung automatisch aktiviert. Sie bleibt an, bis der Motor einmal lief und wieder abgestellt wurde. Innerhalb von 10\u00a0Sekunden kann erneut gestartet werden. Danach muss das Handy wieder erkannt werden.',
+    keyless_desc: 'Verbinde ein Smartphone per BLE mit der Moto32. Nach Erkennung wird eine zeitbasierte Keyless-Session aktiviert. Die Z\u00fcndung wird erst nach dem konfigurierten Taster-Trigger eingeschaltet. W\u00e4hrend der Session wird alle 30 Sekunden gesucht und bei erkanntem Handy der Timer verl\u00e4ngert.',
     keyless_inactive: 'Inaktiv',
     keyless_no_device: 'Kein Ger\u00e4t angelernt',
     keyless_disabled: 'Deaktiviert',
     keyless_disabled_detail: 'Keyless-Funktion ist ausgeschaltet',
     keyless_unlocked: 'Entsperrt',
-    keyless_unlocked_detail: 'Ger\u00e4t erkannt ({rssi} dBm) \u2013 Z\u00fcndung freigegeben',
-    keyless_grace: 'Nachlauf',
-    keyless_grace_detail: '{sec}s verbleibend f\u00fcr Neustart',
+    keyless_unlocked_detail: 'Erkannt (L{level}, {rssi} dBm) \u2013 Restzeit {time}',
+    keyless_unlocked_time_only: 'Z\u00fcndung freigegeben \u2013 Restzeit {time}',
+    keyless_waiting_button: 'Bereit',
+    keyless_waiting_button_detail: 'Handy erkannt. Dr\u00fccke {button}, um die Z\u00fcndung einzuschalten.',
+    keyless_scan_active: 'Suche l\u00e4uft...',
+    keyless_scan_active_detail: 'Refresh-Scan aktiv \u2013 Restzeit {time}',
+    keyless_searching: 'Suche',
+    keyless_searching_detail: 'Suche nach angelerntem Ger\u00e4t...',
     keyless_locked: 'Gesperrt',
     keyless_locked_detail: 'Warte auf Handy-Erkennung\u2026',
 
@@ -1079,10 +1507,32 @@ const LANG = {
     card_keyless_settings: 'Keyless-Einstellungen',
     set_keyless_en_name: 'Keyless aktiviert',
     set_keyless_en_desc: 'BLE-Ann\u00e4herungserkennung f\u00fcr Z\u00fcndung',
-    set_rssi_name: 'RSSI Schwelle',
-    set_rssi_desc: 'Signalst\u00e4rke f\u00fcr Erkennung (typ. -70 bis -50 dBm)',
-    set_grace_name: 'Nachlaufzeit',
-    set_grace_desc: 'Sekunden nach Motorabschaltung, in denen Neustart m\u00f6glich ist',
+    set_rssi_name: 'Signalstufen-Schwelle',
+    set_rssi_desc: 'W\u00e4hle 1..6. Niedrig akzeptiert schw\u00e4cheres Signal.',
+    set_rssi_live: 'Aktuelle Schwelle: Stufe {level} ({dbm} dBm)',
+    opt_rssi_1: '1 (sehr schwach, -100 dBm)',
+    opt_rssi_2: '2 (-92 dBm)',
+    opt_rssi_3: '3 (-84 dBm)',
+    opt_rssi_4: '4 (-76 dBm)',
+    opt_rssi_5: '5 (-68 dBm)',
+    opt_rssi_6: '6 (stark, -60 dBm)',
+    set_active_name: 'Z\u00fcndungs-Session',
+    set_active_desc: 'Wie lange die Z\u00fcndung nach Handy-Erkennung aktiv bleibt',
+    opt_active_1: '1 min',
+    opt_active_5: '5 min',
+    opt_active_10: '10 min',
+    set_act_mode_name: 'Z\u00fcndungs-Trigger',
+    set_act_mode_desc: 'Wie BLE Keyless die Z\u00fcndung einschalten darf',
+    opt_act_mode_any: 'Beliebiger Taster',
+    opt_act_mode_selected: 'Ausgew\u00e4hlter Taster',
+    set_act_button_name: 'Trigger-Taster',
+    set_act_button_desc: 'Wird bei "Ausgew\u00e4hlter Taster" verwendet',
+    opt_act_btn_start: 'Starter',
+    opt_act_btn_light: 'Licht',
+    opt_act_btn_horn: 'Hupe',
+    opt_act_btn_left: 'Blinker links',
+    opt_act_btn_right: 'Blinker rechts',
+    info_keyless_settings: 'Steuerzentrale f\u00fcr BLE-Keyless.\n- Keyless aktivieren/deaktivieren.\n- Signal-Schwelle als Stufe 1..6 setzen.\n- Session-Laufzeit definieren.\n- Z\u00fcndungs-Triggerlogik w\u00e4hlen (jeder Taster oder ein gew\u00e4hlter Taster).',
 
     toast_saved: 'Einstellungen gespeichert',
     toast_factory: 'Werkseinstellungen wiederhergestellt',
@@ -1125,24 +1575,70 @@ function applyI18n() {
   document.querySelectorAll('[data-i18n]').forEach(el => {
     el.textContent = t(el.dataset.i18n);
   });
+  if (activeInfoKey) renderInfoOverlay();
   updateModeUi();
   if ($('connText')) $('connText').textContent = connected ? t('conn_connected') : t('conn_disconnected');
-  updateBleConnectionUi(lastDiagState ? !!lastDiagState.bleConnected : false);
+  if (lastKeylessState) {
+    updateBleConnectionUi({
+      detected: (lastKeylessState.statusDetected !== undefined)
+          ? !!lastKeylessState.statusDetected
+          : !!lastKeylessState.phoneDetected,
+      scanning: !!lastKeylessState.autoSearching || !!lastKeylessState.sessionRefreshSearching,
+      nextScanIn: lastKeylessState.nextScanIn
+    });
+  } else {
+    updateBleConnectionUi({detected:false, scanning:false, nextScanIn:-1});
+  }
   updateTurnDistanceCalibrationUi();
+  updateRssiLevelUi();
+  updateHomeOverview();
+  updateProfileOverlay();
 }
 
 // ─── Select population (language-aware) ───
 function populateSelects() {
   const fill = (id, opts) => {
     const sel = document.getElementById(id);
+    if (!sel) return;
     const cur = sel.value;
     sel.innerHTML = opts.map((o,i) => `<option value="${i}">${o}</option>`).join('');
     if (cur !== '') sel.value = cur;
+  };
+  const fillValues = (id, options, normalizeFn, defaultValue = null) => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = options.map(o =>
+      `<option value="${o.value}">${o.label}</option>`).join('');
+    if (cur !== '') {
+      const normalized = normalizeFn ? normalizeFn(cur) : cur;
+      sel.value = String(normalized);
+    } else if (defaultValue !== null) {
+      const normalized = normalizeFn ? normalizeFn(defaultValue) : defaultValue;
+      sel.value = String(normalized);
+    }
   };
   fill('s_handlebar', [t('opt_hbar_a'),t('opt_hbar_b'),t('opt_hbar_c'),t('opt_hbar_d'),t('opt_hbar_e')]);
   fill('s_rear', [t('opt_rear_0'),t('opt_rear_1'),t('opt_rear_2')]);
   fill('s_lowBeam', [t('opt_low_0'),t('opt_low_1'),t('opt_low_2')]);
   fill('s_parking', [t('opt_park_0'),t('opt_park_1'),t('opt_park_2'),t('opt_park_3')]);
+  fill('s_drlSource', [
+    t('opt_drlsrc_0'),
+    t('opt_drlsrc_1'),
+    t('opt_drlsrc_2'),
+    t('opt_drlsrc_3'),
+    t('opt_drlsrc_4')
+  ]);
+  fillValues('s_drlDim', [
+    {value: 25, label: t('opt_drldim_25')},
+    {value: 50, label: t('opt_drldim_50')},
+    {value: 75, label: t('opt_drldim_75')},
+    {value: 100, label: t('opt_drldim_100')}
+  ], v => {
+    const n = Number(v);
+    if (n === 25 || n === 50 || n === 75 || n === 100) return n;
+    return 50;
+  }, 50);
   fill('s_turnMode', [t('opt_turn_0'),t('opt_turn_1'),t('opt_turn_2'),t('opt_turn_3'),t('opt_turn_4')]);
   fill('s_brakeMode', [t('opt_brake_0'),t('opt_brake_1'),t('opt_brake_2'),t('opt_brake_3'),t('opt_brake_4'),t('opt_brake_5'),t('opt_brake_6')]);
 
@@ -1152,6 +1648,31 @@ function populateSelects() {
   fill('s_alarm', [t('opt_alarm_0'),t('opt_alarm_1')]);
   fill('s_aux1', [t('opt_aux_0'),t('opt_aux_1'),t('opt_aux_2'),t('opt_aux_3')]);
   fill('s_aux2', [t('opt_aux_0'),t('opt_aux_1'),t('opt_aux_2'),t('opt_aux_3')]);
+
+  const rssiOptions = [];
+  for (let level = 1; level <= 6; level++) {
+    rssiOptions.push({value: level, label: t('opt_rssi_' + level)});
+  }
+  fillValues('s_rssiLevel', rssiOptions, normalizeRssiLevel, 4);
+
+  const activeOptions = ACTIVE_MIN_OPTIONS.map(min => ({
+    value: min,
+    label: t('opt_active_' + min)
+  }));
+  fillValues('s_activeTime', activeOptions, normalizeActiveMinutes, 5);
+
+  fillValues('s_actMode', [
+    {value: 0, label: t('opt_act_mode_any')},
+    {value: 1, label: t('opt_act_mode_selected')}
+  ], normalizeActivationMode, 0);
+
+  fillValues('s_actButton', KEYLESS_BUTTON_OPTIONS.map(id => ({
+    value: id,
+    label: t('opt_act_btn_' + id)
+  })), normalizeActivationButton, 0);
+
+  updateRssiLevelUi();
+  updateKeylessActivationUi();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1170,25 +1691,239 @@ let reconnTimer = null;
 let logLines = [];
 let advancedMode = false;
 let lastDiagState = null;
+let lastKeylessState = null;
 let toastTimer = null;
 let scanWatchdogTimer = null;
+let keylessUiLockUntil = 0;
+let keylessPendingConfig = null;
 let lastBleScanSignature = '';
 let currentSpeedPulses = 0;
 let turnDistanceCalibrationActive = false;
 let turnDistanceCalibrationStartPulses = 0;
+let activeInfoKey = '';
+let settingsProfileReady = true;
+let profileSetupSkipped = false;
+let profileData = {driverName:'', bikeBrand:'', bikeModel:''};
+let firmwareVersion = '--';
 
 // ─── DOM refs ───
 const $ = id => document.getElementById(id);
+
+const RSSI_LEVEL_TO_DBM = {
+  1: -100,
+  2: -92,
+  3: -84,
+  4: -76,
+  5: -68,
+  6: -60
+};
+const ACTIVE_MIN_OPTIONS = [1, 5, 10];
+const KEYLESS_BUTTON_OPTIONS = ['start', 'light', 'horn', 'left', 'right'];
+
+function normalizeRssiLevel(level){
+  const n = Number(level);
+  if (!Number.isFinite(n)) return 4;
+  return Math.max(1, Math.min(6, Math.round(n)));
+}
+
+function rssiDbmForLevel(level){
+  return RSSI_LEVEL_TO_DBM[normalizeRssiLevel(level)] ?? RSSI_LEVEL_TO_DBM[4];
+}
+
+function rssiLevelForDbm(dbm){
+  const val = Number(dbm);
+  if (!Number.isFinite(val)) return 4;
+  let bestLevel = 4;
+  let bestDiff = Math.abs(val - rssiDbmForLevel(bestLevel));
+  for (let level = 1; level <= 6; level++) {
+    const diff = Math.abs(val - rssiDbmForLevel(level));
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      bestLevel = level;
+    }
+  }
+  return bestLevel;
+}
+
+function normalizeActiveMinutes(min){
+  const n = Number(min);
+  if (!Number.isFinite(n)) return 5;
+  let best = ACTIVE_MIN_OPTIONS[0];
+  let bestDiff = Math.abs(n - best);
+  for (const candidate of ACTIVE_MIN_OPTIONS) {
+    const diff = Math.abs(n - candidate);
+    if (diff < bestDiff) {
+      best = candidate;
+      bestDiff = diff;
+    }
+  }
+  return best;
+}
+
+function normalizeActivationMode(mode){
+  return Number(mode) === 1 ? 1 : 0;
+}
+
+function normalizeActivationButton(button){
+  const str = String(button);
+  if (KEYLESS_BUTTON_OPTIONS.includes(str)) return str;
+  const n = Number(button);
+  if (Number.isFinite(n) && n >= 0 && n < KEYLESS_BUTTON_OPTIONS.length) {
+    return KEYLESS_BUTTON_OPTIONS[Math.round(n)];
+  }
+  return 'start';
+}
+
+function activeMinutesFromLegacyGrace(sec){
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n <= 0) return 5;
+  return normalizeActiveMinutes(Math.round(n / 60));
+}
+
+function activationButtonIndex(button){
+  const idx = KEYLESS_BUTTON_OPTIONS.indexOf(normalizeActivationButton(button));
+  return idx >= 0 ? idx : 0;
+}
+
+function activationButtonLabel(button){
+  const id = normalizeActivationButton(button);
+  return t('opt_act_btn_' + id);
+}
+
+function formatSessionTime(totalSeconds){
+  const sec = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const m = Math.floor(sec / 60);
+  const s = String(sec % 60).padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+function sanitizeProfileText(value){
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 23);
+}
+
+function profileReadyFromValues(brand, model, driver){
+  return sanitizeProfileText(brand).length > 0
+      && sanitizeProfileText(model).length > 0
+      && sanitizeProfileText(driver).length > 0;
+}
+
+function syncProfileInputs(brand, model, driver){
+  if ($('s_bikeBrand') && document.activeElement !== $('s_bikeBrand')) {
+    $('s_bikeBrand').value = brand;
+  }
+  if ($('s_bikeModel') && document.activeElement !== $('s_bikeModel')) {
+    $('s_bikeModel').value = model;
+  }
+  if ($('s_driverName') && document.activeElement !== $('s_driverName')) {
+    $('s_driverName').value = driver;
+  }
+  if ($('onb_bikeBrand') && document.activeElement !== $('onb_bikeBrand')) {
+    $('onb_bikeBrand').value = brand;
+  }
+  if ($('onb_bikeModel') && document.activeElement !== $('onb_bikeModel')) {
+    $('onb_bikeModel').value = model;
+  }
+  if ($('onb_driverName') && document.activeElement !== $('onb_driverName')) {
+    $('onb_driverName').value = driver;
+  }
+}
+
+function updateHomeOverview(){
+  const diag = lastDiagState || {};
+  const brand = sanitizeProfileText(profileData.bikeBrand);
+  const model = sanitizeProfileText(profileData.bikeModel);
+  const driver = sanitizeProfileText(profileData.driverName);
+
+  if ($('homeGreeting')) {
+    $('homeGreeting').textContent = driver
+        ? t('home_hello_driver', {driver})
+        : t('home_hello_generic');
+  }
+  if ($('homeBike')) {
+    $('homeBike').textContent = (brand && model)
+        ? t('home_bike_named', {brand, model})
+        : t('home_bike_missing');
+  }
+  if ($('homeFirmware')) $('homeFirmware').textContent = firmwareVersion || '--';
+  if ($('homeMode')) $('homeMode').textContent = advancedMode ? t('mode_advanced') : t('mode_basic');
+  if ($('homeVoltage')) {
+    const v = Number(diag.voltage || 0);
+    $('homeVoltage').textContent = `${v.toFixed(1)} V`;
+  }
+  if ($('homeIgnition')) $('homeIgnition').textContent = diag.ignitionOn ? t('state_on') : t('state_off');
+  if ($('homeEngine')) {
+    let engineText = t('state_off');
+    if (diag.engineRunning) engineText = t('eng_running');
+    else if (diag.starterEngaged) engineText = t('eng_starter');
+    else if (diag.ignitionOn) engineText = t('eng_ignition');
+    $('homeEngine').textContent = engineText;
+  }
+}
+
+function updateProfileOverlay(){
+  const overlay = $('profileOverlay');
+  if (!overlay) return;
+  overlay.classList.toggle('show', !settingsProfileReady && !profileSetupSkipped);
+}
+
+function skipProfileOnboarding(){
+  profileSetupSkipped = true;
+  updateProfileOverlay();
+  saveSettings({silentToast: true, profileSkip: true});
+  toast(t('profile_setup_skipped'), 'success', 2200);
+}
+
+function saveProfileOnboarding(){
+  const brand = sanitizeProfileText($('onb_bikeBrand') ? $('onb_bikeBrand').value : '');
+  const model = sanitizeProfileText($('onb_bikeModel') ? $('onb_bikeModel').value : '');
+  const driver = sanitizeProfileText($('onb_driverName') ? $('onb_driverName').value : '');
+  if (!profileReadyFromValues(brand, model, driver)) {
+    toast(t('profile_setup_required'), 'error', 3600);
+    return;
+  }
+  if ($('s_bikeBrand')) $('s_bikeBrand').value = brand;
+  if ($('s_bikeModel')) $('s_bikeModel').value = model;
+  if ($('s_driverName')) $('s_driverName').value = driver;
+  profileSetupSkipped = false;
+  saveSettings({silentToast: true, profileSkip: false});
+  toast(t('profile_setup_done'), 'success', 2400);
+}
 
 function bleDebug(message, payload){
   if (payload === undefined) console.debug('[BLE]', message);
   else console.debug('[BLE]', message, payload);
 }
 
+function updateRssiLevelUi(dbmOverride){
+  const input = $('s_rssiLevel');
+  const info = $('rssiLevelInfo');
+  if (!input || !info) return;
+  const level = normalizeRssiLevel(input.value);
+  input.value = level;
+  const dbm = Number.isFinite(Number(dbmOverride))
+      ? Math.round(Number(dbmOverride))
+      : rssiDbmForLevel(level);
+  info.textContent = t('set_rssi_live', {level, dbm});
+}
+
+function updateKeylessActivationUi(){
+  const modeInput = $('s_actMode');
+  const buttonInput = $('s_actButton');
+  if (!modeInput || !buttonInput) return;
+  const mode = normalizeActivationMode(modeInput.value);
+  modeInput.value = String(mode);
+  buttonInput.disabled = mode !== 1;
+}
+
+function isKeylessUiLocked(){
+  return Date.now() < keylessUiLockUntil;
+}
+
 function updateModeUi(){
   document.body.classList.toggle('advanced-mode', advancedMode);
   if ($('modeChip')) $('modeChip').textContent = advancedMode ? t('mode_advanced') : t('mode_basic');
   if ($('modeBanner')) $('modeBanner').textContent = t('mode_banner');
+  if ($('advHoldHint')) $('advHoldHint').textContent = t('adv_hold_hint');
   if ($('btnModeBasic')) $('btnModeBasic').classList.toggle('active', !advancedMode);
   if ($('btnModeAdvanced')) $('btnModeAdvanced').classList.toggle('active', advancedMode);
 
@@ -1196,14 +1931,38 @@ function updateModeUi(){
     tile.classList.add('clickable');
     tile.classList.toggle('locked', !advancedMode);
   });
+  document.querySelectorAll('#inputGrid .io-tile').forEach(tile => {
+    tile.classList.add('clickable');
+    tile.classList.toggle('locked', !advancedMode);
+  });
+  updateHomeOverview();
 }
 
-function updateBleConnectionUi(isConnected){
+function updateBleConnectionUi(meta){
   const dot = $('bleDot');
   const text = $('bleText');
   if (!dot || !text) return;
-  dot.classList.toggle('ok', !!isConnected);
-  text.textContent = isConnected ? t('ble_connected') : t('ble_disconnected');
+  let detected = false;
+  let scanning = false;
+  let nextScanIn = -1;
+
+  if (meta && typeof meta === 'object') {
+    detected = !!meta.detected;
+    scanning = !!meta.scanning;
+    const n = Number(meta.nextScanIn);
+    nextScanIn = Number.isFinite(n) ? Math.floor(n) : -1;
+  } else if (typeof meta === 'boolean') {
+    detected = !!meta;
+  }
+
+  dot.classList.toggle('ok', detected);
+  if (scanning) {
+    text.textContent = t('ble_scanning');
+  } else if (nextScanIn >= 0) {
+    text.textContent = t('ble_next_scan', {sec: nextScanIn});
+  } else {
+    text.textContent = t('ble_next_scan_na');
+  }
 }
 
 function updateTurnDistanceCalibrationUi(){
@@ -1225,6 +1984,7 @@ function updateTurnDistanceCalibrationUi(){
 
 function setControlMode(mode, opts = {}){
   const {skipConfirm = false, silent = false, force = false} = opts;
+  const wasAdvanced = advancedMode;
   if (!force && ((mode === 'advanced') === advancedMode)) return;
   if (mode === 'advanced' && !skipConfirm) {
     if (!confirm(t('confirm_advanced'))) {
@@ -1234,6 +1994,9 @@ function setControlMode(mode, opts = {}){
   }
   advancedMode = mode === 'advanced';
   updateModeUi();
+  if (wasAdvanced && !advancedMode) {
+    wsSend({cmd:'clearInputOverrides'});
+  }
   if (!silent) {
     toast(t(advancedMode ? 'toast_adv_enabled' : 'toast_adv_disabled'),
       advancedMode ? 'error' : 'success');
@@ -1252,11 +2015,73 @@ function handleOutputTileClick(ev){
   wsSend({cmd:'toggleOutput', id});
 }
 
+function handleOutputTileHold(tile){
+  const id = tile.dataset.outputId;
+  if (!id || !advancedMode) return;
+  bleDebug('clear output override requested', {id});
+  wsSend({cmd:'clearOutputOverride', id});
+}
+
+function handleInputTileClick(ev){
+  const tile = ev.currentTarget;
+  const id = tile.dataset.inputId;
+  if (!id) return;
+  if (!advancedMode) {
+    toast(t('toast_adv_required'), 'error', 4200);
+    return;
+  }
+  bleDebug('toggle input requested', {id});
+  wsSend({cmd:'toggleInput', id});
+}
+
+function handleInputTileHold(tile){
+  const id = tile.dataset.inputId;
+  if (!id || !advancedMode) return;
+  bleDebug('clear input override requested', {id});
+  wsSend({cmd:'clearInputOverride', id});
+}
+
+function bindTilePressHandlers(tile, onTap, onHold){
+  let holdTimer = null;
+  let holdFired = false;
+
+  const startHold = () => {
+    if (!advancedMode) return;
+    holdFired = false;
+    if (holdTimer) clearTimeout(holdTimer);
+    holdTimer = setTimeout(() => {
+      holdFired = true;
+      onHold(tile);
+    }, 1000);
+  };
+
+  const stopHold = () => {
+    if (holdTimer) {
+      clearTimeout(holdTimer);
+      holdTimer = null;
+    }
+  };
+
+  tile.addEventListener('mousedown', startHold);
+  tile.addEventListener('touchstart', startHold, {passive:true});
+  tile.addEventListener('mouseup', stopHold);
+  tile.addEventListener('mouseleave', stopHold);
+  tile.addEventListener('touchend', stopHold);
+  tile.addEventListener('touchcancel', stopHold);
+  tile.addEventListener('click', ev => {
+    if (holdFired) {
+      holdFired = false;
+      return;
+    }
+    onTap(ev);
+  });
+}
+
 // ─── Init Tiles ───
 function initTiles(){
   const ig = $('inputGrid');
   ig.innerHTML = INPUT_IDS.map(id => `
-    <div class="io-tile" id="in_${id}">
+    <div class="io-tile clickable locked" id="in_${id}" data-input-id="${id}">
       <div class="name"><span class="status-dot"></span>${t('in_'+id)}<span class="pin">GPIO ${INPUT_PINS[id]}</span></div>
       <div class="val">OFF</div>
       <div class="sub">\u2013</div>
@@ -1269,7 +2094,10 @@ function initTiles(){
       <div class="sub">\u2013</div>
     </div>`).join('');
   document.querySelectorAll('#outputGrid .io-tile').forEach(tile => {
-    tile.addEventListener('click', handleOutputTileClick);
+    bindTilePressHandlers(tile, handleOutputTileClick, handleOutputTileHold);
+  });
+  document.querySelectorAll('#inputGrid .io-tile').forEach(tile => {
+    bindTilePressHandlers(tile, handleInputTileClick, handleInputTileHold);
   });
   updateModeUi();
 }
@@ -1285,19 +2113,22 @@ function wsConnect(){
     setControlMode('basic', {silent:true, force:true});
     $('connDot').classList.add('ok');
     $('connText').textContent = t('conn_connected');
+    updateBleConnectionUi({detected:false, scanning:false, nextScanIn:-1});
     addLog(t('ws_connected'));
     bleDebug('websocket connected');
     ws.send(JSON.stringify({cmd:'getSettings'}));
     ws.send(JSON.stringify({cmd:'getKeyless'}));
+    updateHomeOverview();
   };
   ws.onclose = () => {
     connected = false;
     $('connDot').classList.remove('ok');
     $('connText').textContent = t('conn_disconnected');
-    updateBleConnectionUi(false);
+    updateBleConnectionUi({detected:false, scanning:false, nextScanIn:-1});
     addLog(t('conn_lost'));
     clearTimeout(reconnTimer);
     reconnTimer = setTimeout(wsConnect, 2000);
+    updateHomeOverview();
   };
   ws.onerror = () => ws.close();
   ws.onmessage = e => {
@@ -1326,7 +2157,6 @@ function handleMsg(m){
 function updateDiag(s){
   lastDiagState = s;
   currentSpeedPulses = Number(s.speedPulses || 0);
-  updateBleConnectionUi(!!s.bleConnected);
   if (typeof s.turnCalActive === 'boolean') {
     turnDistanceCalibrationActive = s.turnCalActive;
     if (turnDistanceCalibrationActive && typeof s.turnCalPulses === 'number') {
@@ -1364,10 +2194,14 @@ function updateDiag(s){
     const tile = $('in_'+id);
     if(!tile) return;
     const active = !!ins[id];
+    const manual = !!ins[id+'_manual'];
+    const manualState = !!ins[id+'_manual_state'];
     tile.classList.toggle('active', active);
+    tile.classList.toggle('manual-forced', manual);
     tile.querySelector('.val').textContent = active?'ON':'OFF';
     const extra = ins[id+'_info'];
-    if(extra) tile.querySelector('.sub').textContent = extra;
+    if(manual) tile.querySelector('.sub').textContent = manualState ? t('manual_on') : t('manual_off');
+    else if(extra) tile.querySelector('.sub').textContent = extra;
     else tile.querySelector('.sub').textContent = active?t('io_active'):t('io_inactive');
   });
 
@@ -1377,13 +2211,17 @@ function updateDiag(s){
     const tile = $('out_'+id);
     if(!tile) return;
     const active = !!outs[id];
+    const manual = !!outs[id+'_manual'];
     tile.classList.toggle('active', active);
+    tile.classList.toggle('manual-forced', manual);
     tile.querySelector('.val').textContent = active?'ON':'OFF';
     const pwm = outs[id+'_pwm'];
-    if(pwm!==undefined && pwm>0) tile.querySelector('.sub').textContent = 'PWM '+Math.round(pwm/255*100)+'%';
+    if(manual) tile.querySelector('.sub').textContent = t('manual_on');
+    else if(pwm!==undefined && pwm>0) tile.querySelector('.sub').textContent = 'PWM '+Math.round(pwm/255*100)+'%';
     else if (advancedMode) tile.querySelector('.sub').textContent = t('adv_tap_toggle');
     else tile.querySelector('.sub').textContent = active?'\u26a1 '+t('io_active'):t('io_inactive');
   });
+  updateHomeOverview();
 }
 
 // ─── Settings ───
@@ -1394,17 +2232,55 @@ function applySettings(s){
   $('s_brakeMode').value = s.brake??0;
   $('s_alarm').value     = s.alarm??0;
   $('s_posLight').value  = s.pos??0;
-  $('s_wave').checked    = !!s.wave;
   $('s_lowBeam').value   = s.low??0;
   $('s_aux1').value      = s.aux1??0;
   $('s_aux2').value      = s.aux2??0;
   $('s_standKill').value = s.stand??0;
   $('s_parking').value   = s.park??0;
+  $('s_drlSource').value = s.drlsrc??0;
+  $('s_drlDim').value    = s.drldim??50;
   $('s_turnDist').value  = s.tdist??50;
+
+  const brand = sanitizeProfileText(s.bikeBrand ?? s.brand ?? '');
+  const model = sanitizeProfileText(s.bikeModel ?? s.model ?? '');
+  const driver = sanitizeProfileText(s.driverName ?? s.driver ?? '');
+  profileData = {
+    bikeBrand: brand,
+    bikeModel: model,
+    driverName: driver
+  };
+  if (typeof s.profileReady === 'boolean') {
+    settingsProfileReady = s.profileReady;
+  } else {
+    settingsProfileReady = profileReadyFromValues(brand, model, driver);
+  }
+  profileSetupSkipped = !!s.profileSkip;
+  firmwareVersion = s.firmware || firmwareVersion;
+  syncProfileInputs(brand, model, driver);
   updateTurnDistanceCalibrationUi();
+  updateHomeOverview();
+  updateProfileOverlay();
 }
 
-function saveSettings(){
+function saveSettings(opts = {}){
+  const {silentToast = false, profileSkip = null} = opts;
+  const bikeBrand = sanitizeProfileText($('s_bikeBrand') ? $('s_bikeBrand').value : '');
+  const bikeModel = sanitizeProfileText($('s_bikeModel') ? $('s_bikeModel').value : '');
+  const driverName = sanitizeProfileText($('s_driverName') ? $('s_driverName').value : '');
+  const profileReady = profileReadyFromValues(bikeBrand, bikeModel, driverName);
+  let profileSkipValue;
+  if (profileSkip === null || profileSkip === undefined) {
+    profileSkipValue = profileReady ? false : profileSetupSkipped;
+  } else {
+    profileSkipValue = !!profileSkip;
+  }
+  profileSetupSkipped = profileSkipValue;
+  settingsProfileReady = profileReady;
+  if ($('s_bikeBrand')) $('s_bikeBrand').value = bikeBrand;
+  if ($('s_bikeModel')) $('s_bikeModel').value = bikeModel;
+  if ($('s_driverName')) $('s_driverName').value = driverName;
+  syncProfileInputs(bikeBrand, bikeModel, driverName);
+  updateProfileOverlay();
   wsSend({cmd:'setSettings', data:{
     handlebar: +$('s_handlebar').value,
     rear:      +$('s_rear').value,
@@ -1412,15 +2288,20 @@ function saveSettings(){
     brake:     +$('s_brakeMode').value,
     alarm:     +$('s_alarm').value,
     pos:       +$('s_posLight').value,
-    wave:      $('s_wave').checked?1:0,
     low:       +$('s_lowBeam').value,
     aux1:      +$('s_aux1').value,
     aux2:      +$('s_aux2').value,
     stand:     +$('s_standKill').value,
     park:      +$('s_parking').value,
+    drlsrc:    +$('s_drlSource').value,
+    drldim:    +$('s_drlDim').value,
     tdist:     +$('s_turnDist').value,
+    bikeBrand,
+    bikeModel,
+    driverName,
+    profileSkip: profileSkipValue,
   }});
-  toast(t('toast_saved'),'success');
+  if (!silentToast) toast(t('toast_saved'),'success');
 }
 
 function loadSettings(){ wsSend({cmd:'getSettings'}); }
@@ -1434,21 +2315,73 @@ function factoryReset(){
 
 // ─── BLE Keyless ───
 function updateKeyless(m){
+  lastKeylessState = m;
   const ring = $('keylessRing');
   const state = $('keylessState');
   const detail = $('keylessDetail');
+  const level = m.rssiLevel !== undefined
+      ? normalizeRssiLevel(m.rssiLevel)
+      : rssiLevelForDbm(m.rssiThreshold);
+  const activeMinutes = m.activeMinutes !== undefined
+      ? normalizeActiveMinutes(m.activeMinutes)
+      : activeMinutesFromLegacyGrace(m.graceSeconds || 300);
+  const activationMode = normalizeActivationMode(m.activationMode ?? 0);
+  const activationButton = normalizeActivationButton(m.activationButton ?? 0);
+  updateBleConnectionUi({
+    detected: (m.statusDetected !== undefined) ? !!m.statusDetected : !!m.phoneDetected,
+    scanning: !!m.autoSearching || !!m.sessionRefreshSearching,
+    nextScanIn: m.nextScanIn
+  });
 
-  $('s_keylessEn').checked = !!m.enabled;
-  $('s_rssiThresh').value = m.rssiThreshold||-65;
-  $('s_graceTime').value = m.graceSeconds||10;
+  if (keylessPendingConfig) {
+    const ack =
+        keylessPendingConfig.enabled === !!m.enabled
+        && keylessPendingConfig.rssiLevel === level
+        && keylessPendingConfig.activeMinutes === activeMinutes
+        && keylessPendingConfig.activationMode === activationMode
+        && keylessPendingConfig.activationButton === activationButton;
+    if (ack) {
+      keylessPendingConfig = null;
+      keylessUiLockUntil = 0;
+    }
+  }
 
-  if (m.scanning) {
+  const en = $('s_keylessEn');
+  const rssiInput = $('s_rssiLevel');
+  const activeInput = $('s_activeTime');
+  const actModeInput = $('s_actMode');
+  const actButtonInput = $('s_actButton');
+  const allowSync = !isKeylessUiLocked();
+
+  if (en && allowSync && document.activeElement !== en) {
+    en.checked = !!m.enabled;
+  }
+  if (rssiInput && allowSync && document.activeElement !== rssiInput) {
+    rssiInput.value = level;
+    updateRssiLevelUi(m.rssiThresholdDbm ?? m.rssiThreshold);
+  } else {
+    updateRssiLevelUi();
+  }
+  if (activeInput && allowSync && document.activeElement !== activeInput) {
+    activeInput.value = String(activeMinutes);
+  }
+  if (actModeInput && allowSync && document.activeElement !== actModeInput) {
+    actModeInput.value = String(activationMode);
+  }
+  if (actButtonInput && allowSync && document.activeElement !== actButtonInput) {
+    actButtonInput.value = activationButton;
+  }
+  updateKeylessActivationUi();
+
+  if (m.scanning || m.autoSearching) {
     const count = Array.isArray(m.scanResults) ? m.scanResults.length : 0;
-    const sig = `scan:${m.scanning}|count:${count}|ready:${m.scanReady}|running:${m.scannerRunning}`;
+    const sig = `scan:${m.scanning}|auto:${!!m.autoSearching}|refresh:${!!m.sessionRefreshSearching}|count:${count}|ready:${m.scanReady}|running:${m.scannerRunning}`;
     if (sig !== lastBleScanSignature) {
       lastBleScanSignature = sig;
       bleDebug('scan status update', {
         scanning: m.scanning,
+        autoSearching: !!m.autoSearching,
+        sessionRefreshSearching: !!m.sessionRefreshSearching,
         count,
         scanReady: m.scanReady,
         scannerRunning: m.scannerRunning
@@ -1466,7 +2399,8 @@ function updateKeyless(m){
           <div style="font-weight:500">${d.name||t('unknown')}</div>
           <div class="mac">${d.mac}</div>
         </div>
-        <div class="rssi">${d.rssi?d.rssi+' dBm':'\u2013'}</div>
+        <div class="rssi">${(Number.isFinite(Number(d.rssi)) && Number(d.rssi) < 0 && Number(d.rssi) > -127)
+            ? `L${rssiLevelForDbm(Number(d.rssi))} (${Number(d.rssi)} dBm)` : '\u2013'}</div>
         <button class="btn danger" style="padding:5px 10px;font-size:.7rem" onclick="removePaired('${d.mac}')">\u2715</button>
       </div>`).join('');
   } else {
@@ -1474,23 +2408,55 @@ function updateKeyless(m){
   }
 
   // Status
+  const hasPaired = Array.isArray(m.paired) && m.paired.length > 0;
+  const sessionActive = !!m.sessionActive;
+  const waitingForButton = !!m.waitingForButton;
+  const sessionRemaining = Math.max(0, Math.floor(Number(m.sessionRemaining) || 0));
+  const sessionTime = formatSessionTime(sessionRemaining);
+  const curRssi = Number.isFinite(Number(m.currentRssi)) ? Number(m.currentRssi) : null;
+  const curLvl = curRssi !== null ? rssiLevelForDbm(curRssi) : '?';
+
   if(!m.enabled){
     ring.classList.remove('active');
     ring.innerHTML = '\ud83d\udd12';
     state.textContent = t('keyless_disabled');
+    state.style.color = '';
     detail.textContent = t('keyless_disabled_detail');
-  } else if(m.phoneDetected){
+  } else if (!hasPaired) {
+    ring.classList.remove('active');
+    ring.innerHTML = '\ud83d\udd12';
+    state.textContent = t('keyless_locked');
+    state.style.color = 'var(--danger)';
+    detail.textContent = t('keyless_no_device');
+  } else if(sessionActive){
     ring.classList.add('active');
-    ring.innerHTML = '\ud83d\udd13';
-    state.textContent = t('keyless_unlocked');
-    state.style.color = 'var(--accent)';
-    detail.textContent = t('keyless_unlocked_detail', {rssi: m.currentRssi||'?'});
-  } else if(m.graceActive){
+    ring.innerHTML = m.sessionRefreshSearching ? '\ud83d\udd0d' : '\ud83d\udd13';
+    state.textContent = m.sessionRefreshSearching
+        ? t('keyless_scan_active')
+        : (waitingForButton ? t('keyless_waiting_button') : t('keyless_unlocked'));
+    state.style.color = m.sessionRefreshSearching ? 'var(--warn)' : 'var(--accent)';
+    if (m.sessionRefreshSearching) {
+      detail.textContent = t('keyless_scan_active_detail', {time: sessionTime});
+    } else if (waitingForButton) {
+      const buttonLabel = activationMode === 1
+          ? activationButtonLabel(activationButton)
+          : t('opt_act_mode_any');
+      detail.textContent = t('keyless_waiting_button_detail', {button: buttonLabel});
+    } else if (curRssi !== null) {
+      detail.textContent = t('keyless_unlocked_detail', {
+        level: curLvl,
+        rssi: curRssi,
+        time: sessionTime
+      });
+    } else {
+      detail.textContent = t('keyless_unlocked_time_only', {time: sessionTime});
+    }
+  } else if(!!m.autoSearching){
     ring.classList.add('active');
-    ring.innerHTML = '\u23f1';
-    state.textContent = t('keyless_grace');
+    ring.innerHTML = '\ud83d\udd0d';
+    state.textContent = t('keyless_searching');
     state.style.color = 'var(--warn)';
-    detail.textContent = t('keyless_grace_detail', {sec: m.graceRemaining||0});
+    detail.textContent = t('keyless_searching_detail');
   } else {
     ring.classList.remove('active');
     ring.innerHTML = '\ud83d\udd12';
@@ -1514,14 +2480,27 @@ function updateKeyless(m){
     $('scanResults').innerHTML = '<div style="color:var(--dim);padding:12px">'+t('no_devices_found')+'</div>';
     bleDebug('scan finished without named devices');
   }
+  updateHomeOverview();
 }
 
 function sendKeylessConfig(){
-  wsSend({cmd:'setKeyless', data:{
+  const cfg = {
     enabled: $('s_keylessEn').checked,
-    rssiThreshold: +$('s_rssiThresh').value,
-    graceSeconds: +$('s_graceTime').value,
-  }});
+    rssiLevel: normalizeRssiLevel($('s_rssiLevel').value),
+    activeMinutes: normalizeActiveMinutes($('s_activeTime').value || 5),
+    activationMode: normalizeActivationMode($('s_actMode').value || 0),
+    activationButton: activationButtonIndex($('s_actButton').value || 'start')
+  };
+  $('s_activeTime').value = String(cfg.activeMinutes);
+  $('s_actMode').value = String(cfg.activationMode);
+  $('s_actButton').value = normalizeActivationButton($('s_actButton').value || 'start');
+  updateKeylessActivationUi();
+  keylessPendingConfig = {
+    ...cfg,
+    activationButton: normalizeActivationButton($('s_actButton').value || 'start')
+  };
+  keylessUiLockUntil = Date.now() + 3000;
+  wsSend({cmd:'setKeyless', data: cfg});
 }
 
 function toggleTurnDistanceCalibration(){
@@ -1620,6 +2599,40 @@ function toast(text, level='success', durationMs=2500){
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(()=> t.className='toast', durationMs);
 }
+
+function infoTitleKeyFromInfoKey(infoKey){
+  if (!infoKey || typeof infoKey !== 'string') return 'tab_settings';
+  if (!infoKey.startsWith('info_')) return 'tab_settings';
+  return 'card_' + infoKey.slice(5);
+}
+
+function renderInfoOverlay(){
+  const overlay = $('infoOverlay');
+  const title = $('infoOverlayTitle');
+  const body = $('infoOverlayBody');
+  const hint = $('infoOverlayHint');
+  if (!overlay || !title || !body || !hint || !activeInfoKey) return;
+  title.textContent = t(infoTitleKeyFromInfoKey(activeInfoKey));
+  body.textContent = t(activeInfoKey);
+  hint.textContent = t('info_overlay_hint');
+}
+
+function showInfo(key){
+  activeInfoKey = key;
+  renderInfoOverlay();
+  const overlay = $('infoOverlay');
+  if (overlay) overlay.classList.add('show');
+}
+
+function closeInfoOverlay(){
+  const overlay = $('infoOverlay');
+  if (overlay) overlay.classList.remove('show');
+  activeInfoKey = '';
+}
+
+document.addEventListener('keydown', ev => {
+  if (ev.key === 'Escape') closeInfoOverlay();
+});
 
 // ─── Tabs ───
 document.querySelectorAll('.tab').forEach(btn => {

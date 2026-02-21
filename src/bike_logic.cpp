@@ -123,8 +123,8 @@ void handleLight() {
 
 // --------------------------------------------------------------------------
 // FIX #3: Starter logic completely reworked
-// The starter now runs while button is held, and engineRunning is only set
-// after the starter has been engaged for STARTER_ENGAGE_DELAY_MS.
+// The starter runs while button is held.
+// Engine running is detected by RPM/speed pulses (see handleSpeedSensor()).
 // --------------------------------------------------------------------------
 
 void handleStart() {
@@ -152,13 +152,6 @@ void handleStart() {
   // While button is held, keep starter running
   if (startEvent.state && bike.starterEngaged) {
     unsigned long elapsed = millis() - bike.starterStartTime;
-
-    // After engage delay, consider engine running
-    if (elapsed >= STARTER_ENGAGE_DELAY_MS && !bike.engineRunning) {
-      bike.engineRunning = true;
-      bike.killActive = false;
-      LOG_I("Engine RUNNING");
-    }
 
     // Safety timeout: max starter duration
     if (elapsed >= STARTER_MAX_DURATION_MS) {
@@ -231,33 +224,21 @@ void updateIgnition() {
 
 // --------------------------------------------------------------------------
 
-// --------------------------------------------------------------------------
-// mo.wave sequential turn signal animation
-// Creates a sweep effect: segments light up sequentially (1→2→3→all),
-// then all off, then repeat. Gives a modern "running light" look.
-// --------------------------------------------------------------------------
-
-static void updateWaveFlasher(int pin, bool isActive, unsigned long now) {
-  if (!isActive) {
-    outputOff(pin);
-    return;
+static uint8_t normalizeDaytimeDimPercent(uint8_t percent) {
+  switch (percent) {
+    case 25:
+    case 50:
+    case 75:
+    case 100:
+      return percent;
+    default:
+      return 50;
   }
+}
 
-  // Total cycle: MOWAVE_STEPS × MOWAVE_STEP_MS (on-sweep) + MOWAVE_OFF_MS (off)
-  unsigned long totalOn  = (unsigned long)MOWAVE_STEPS * MOWAVE_STEP_MS;
-  unsigned long totalCycle = totalOn + MOWAVE_OFF_MS;
-  unsigned long phase = (now - bike.waveStepStart) % totalCycle;
-
-  if (phase < totalOn) {
-    // During on-sweep: PWM brightness ramps up in steps
-    uint8_t step = phase / MOWAVE_STEP_MS;  // 0, 1, 2
-    // Brightness: step 0 = 33%, step 1 = 66%, step 2 = 100%
-    uint8_t duty = (uint8_t)(((step + 1) * 255) / MOWAVE_STEPS);
-    outputPWM(pin, duty);
-  } else {
-    // Off phase
-    outputOff(pin);
-  }
+static uint8_t daytimeDutyFromPercent(uint8_t percent) {
+  const uint8_t p = normalizeDaytimeDimPercent(percent);
+  return (uint8_t)map((int)p, 25, 100, 64, 255);
 }
 
 void updateTurnSignals() {
@@ -290,11 +271,8 @@ void updateTurnSignals() {
     return;
   }
 
-  // Standard flasher logic for non-wave mode
-  bool useWave = settings.moWaveEnabled && !bike.hazardLightsOn;
-
   if (bike.hazardLightsOn) {
-    // Hazard: both flash together (always standard flash, never wave)
+    // Hazard: both flash together
     if (now - bike.lastFlasherToggle >= FLASHER_PERIOD_MS) {
       bike.flasherState = !bike.flasherState;
       bike.lastFlasherToggle = now;
@@ -307,28 +285,20 @@ void updateTurnSignals() {
       outputOff(PIN_TURNR_OUT);
     }
   } else if (bike.leftTurnOn) {
-    if (useWave) {
-      updateWaveFlasher(PIN_TURNL_OUT, true, now);
-    } else {
-      if (now - bike.lastFlasherToggle >= FLASHER_PERIOD_MS) {
-        bike.flasherState = !bike.flasherState;
-        bike.lastFlasherToggle = now;
-      }
-      if (bike.flasherState) outputOn(PIN_TURNL_OUT);
-      else                   outputOff(PIN_TURNL_OUT);
+    if (now - bike.lastFlasherToggle >= FLASHER_PERIOD_MS) {
+      bike.flasherState = !bike.flasherState;
+      bike.lastFlasherToggle = now;
     }
+    if (bike.flasherState) outputOn(PIN_TURNL_OUT);
+    else                   outputOff(PIN_TURNL_OUT);
     outputOff(PIN_TURNR_OUT);
   } else if (bike.rightTurnOn) {
-    if (useWave) {
-      updateWaveFlasher(PIN_TURNR_OUT, true, now);
-    } else {
-      if (now - bike.lastFlasherToggle >= FLASHER_PERIOD_MS) {
-        bike.flasherState = !bike.flasherState;
-        bike.lastFlasherToggle = now;
-      }
-      if (bike.flasherState) outputOn(PIN_TURNR_OUT);
-      else                   outputOff(PIN_TURNR_OUT);
+    if (now - bike.lastFlasherToggle >= FLASHER_PERIOD_MS) {
+      bike.flasherState = !bike.flasherState;
+      bike.lastFlasherToggle = now;
     }
+    if (bike.flasherState) outputOn(PIN_TURNR_OUT);
+    else                   outputOff(PIN_TURNR_OUT);
     outputOff(PIN_TURNL_OUT);
   } else {
     outputOff(PIN_TURNL_OUT);
@@ -363,18 +333,32 @@ void updateLights() {
     bike.lowBeamOn = true;
   }
 
-  // Position light dimming (PWM)
-  if (!bike.lowBeamOn && settings.positionLight > 0) {
+  const uint8_t drlDuty = daytimeDutyFromPercent(settings.daytimeLightDimPercent);
+  const bool drlLowBeam = settings.daytimeLightSource == 1;
+  const bool drlHighBeam = settings.daytimeLightSource == 2;
+
+  // Low-beam output handling:
+  // 1) full low beam
+  // 2) DRL dim (if selected source)
+  // 3) position light dimming
+  if (bike.lowBeamOn) {
+    outputOn(PIN_LIGHT_OUT);
+  } else if (drlLowBeam) {
+    outputPWM(PIN_LIGHT_OUT, drlDuty);
+  } else if (settings.positionLight > 0) {
     uint8_t duty = map(settings.positionLight, 1, 9, 13, 128);  // ~5-50%
     outputPWM(PIN_LIGHT_OUT, duty);
-  } else if (bike.lowBeamOn) {
-    outputOn(PIN_LIGHT_OUT);
   } else {
     outputOff(PIN_LIGHT_OUT);
   }
 
-  if (bike.highBeamOn) outputOn(PIN_HIBEAM_OUT);
-  else                 outputOff(PIN_HIBEAM_OUT);
+  if (bike.highBeamOn) {
+    outputOn(PIN_HIBEAM_OUT);
+  } else if (drlHighBeam) {
+    outputPWM(PIN_HIBEAM_OUT, drlDuty);
+  } else {
+    outputOff(PIN_HIBEAM_OUT);
+  }
 }
 
 // --------------------------------------------------------------------------
@@ -500,6 +484,11 @@ void updateBrakeLight() {
 // --------------------------------------------------------------------------
 
 void updateHorn() {
+  if (safetyIsCriticalLowVoltage()) {
+    outputOff(PIN_HORN_OUT);
+    return;
+  }
+
   if (bike.hornPressed && bike.ignitionOn) {
     outputOn(PIN_HORN_OUT);
   } else {
@@ -540,14 +529,32 @@ static bool auxShouldBeOn(uint8_t mode, bool manualOn) {
 }
 
 void updateAuxOutputs() {
-  if (auxShouldBeOn(settings.aux1Mode, bike.aux1ManualOn)) {
+  if (safetyIsCriticalLowVoltage()) {
+    outputOff(PIN_AUX1_OUT);
+    outputOff(PIN_AUX2_OUT);
+    return;
+  }
+
+  const bool aux1On = auxShouldBeOn(settings.aux1Mode, bike.aux1ManualOn);
+  const bool aux2On = auxShouldBeOn(settings.aux2Mode, bike.aux2ManualOn);
+  const bool drlAux1 = bike.ignitionOn && !bike.starterEngaged
+      && settings.daytimeLightSource == 3;
+  const bool drlAux2 = bike.ignitionOn && !bike.starterEngaged
+      && settings.daytimeLightSource == 4;
+  const uint8_t drlDuty = daytimeDutyFromPercent(settings.daytimeLightDimPercent);
+
+  if (aux1On) {
     outputOn(PIN_AUX1_OUT);
+  } else if (drlAux1) {
+    outputPWM(PIN_AUX1_OUT, drlDuty);
   } else {
     outputOff(PIN_AUX1_OUT);
   }
 
-  if (auxShouldBeOn(settings.aux2Mode, bike.aux2ManualOn)) {
+  if (aux2On) {
     outputOn(PIN_AUX2_OUT);
+  } else if (drlAux2) {
+    outputPWM(PIN_AUX2_OUT, drlDuty);
   } else {
     outputOff(PIN_AUX2_OUT);
   }

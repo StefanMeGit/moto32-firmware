@@ -17,11 +17,18 @@ void bleKeylessUpdate();
 // Returns true if keyless grants ignition permission
 bool bleKeylessIgnitionAllowed();
 
-// Notify keyless that the engine has stopped (start grace timer)
-void bleKeylessEngineOff();
+// Returns true once when keyless requests ignition ON (button trigger)
+bool bleKeylessTakeIgnitionOnRequest();
+
+// Returns true once when keyless requests ignition OFF (session timeout)
+bool bleKeylessTakeIgnitionOffRequest();
 
 // ─── Keyless Configuration ───
-void bleKeylessConfigure(bool enabled, int rssiThreshold, int graceSeconds);
+void bleKeylessConfigure(bool enabled,
+                         int rssiLevelOrLegacyDbm,
+                         int activeMinutesOrLegacySeconds,
+                         int activationMode,
+                         int activationButton);
 
 // ─── Pairing ───
 void bleStartScan();

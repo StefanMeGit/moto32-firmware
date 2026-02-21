@@ -1,10 +1,20 @@
 // ============================================================================
-// MOTO32 FIRMWARE v2.2.0
+// MOTO32 FIRMWARE v0.1-alpha
 // Open-Source Motorcycle Control Unit
 // ESP32-WROOM-32D based – Motogadget M-Unit Blue alternative
 //
+// Lead Software Developer:
+//   STEFAN WAHRENDORFF (0691 Kollektiv)
+//   Stefan.Wahrendorff@gmail.com
+//
+// WARNING / DISCLAIMER:
+//   This software directly controls safety-relevant vehicle functions.
+//   Use, modification, and operation are entirely at your own risk.
+//   No warranty is provided for damage, injury, or legal compliance.
+//   Verify all wiring, logic, and safety behavior before road use.
+//
 // Changelog v2.2 (from v2.1):
-//   NEW: mo.wave sequential turn signal animation (PWM brightness sweep)
+//   NEW: Daytime running light source + dim level (25/50/75/100%)
 //   NEW: AUX output modes (ignition / engine / manual / disabled)
 //   NEW: Parking light modes (position / left blinker / right blinker)
 //   NEW: Rear light / tail light modes (standard / dimmed / always-on)
@@ -16,7 +26,7 @@
 //   FIX: Watchdog API migrated to ESP-IDF v5.x (backward compatible)
 //   FIX: AUX output state in web dashboard reflects actual pin state
 //   FIX: Toast messages use i18n keys (language-neutral)
-//   FIX: Turn signal PWM channels added for mo.wave
+//   FIX: Turn signal handling simplified to standard flasher behavior
 //
 // Changelog v2.1 (from v2.0):
 //   NEW: Web Dashboard (WiFi AP + AsyncWebServer + WebSocket)
@@ -131,9 +141,6 @@ void setup() {
   LOG_I("Moto32 ready. Battery: %.1fV", bike.batteryVoltage);
 }
 
-// Track previous engine state for keyless grace trigger
-static bool prevEngineRunning = false;
-
 // ============================================================================
 // MAIN LOOP
 // ============================================================================
@@ -176,17 +183,22 @@ void loop() {
   // BLE Keyless: update proximity scan + state machine
   bleKeylessUpdate();
 
-  // Keyless ignition: if phone detected, grant ignition even without key
-  if (bleKeylessIgnitionAllowed() && !bike.ignitionOn) {
+  // Keyless ignition: ON only on configured button trigger while session is active.
+  if (bleKeylessTakeIgnitionOnRequest() && bleKeylessIgnitionAllowed() && !bike.ignitionOn) {
     bike.ignitionOn = true;
-    LOG_I("Keyless: ignition ON (BLE proximity)");
+    LOG_I("Keyless: ignition ON (button trigger)");
   }
 
-  // Detect engine-off transition → trigger keyless grace period
-  if (prevEngineRunning && !bike.engineRunning) {
-    bleKeylessEngineOff();
+  if (bleKeylessTakeIgnitionOffRequest() && bike.ignitionOn) {
+    bike.ignitionOn = false;
+    bike.engineRunning = false;
+    bike.starterEngaged = false;
+    bike.starterLightSnapshotValid = false;
+    bike.manualHazardRequested = false;
+    bike.lowBeamOn = false;
+    bike.highBeamOn = false;
+    LOG_I("Keyless: ignition OFF (session timeout)");
   }
-  prevEngineRunning = bike.engineRunning;
 
   // FIX #10: Battery monitoring
   safetyUpdateVoltage();

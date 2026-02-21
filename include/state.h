@@ -13,13 +13,19 @@ struct Settings {
   BrakeLightMode  brakeLightMode  = BRAKE_CONTINUOUS;
   uint8_t         alarmMode       = 0;
   uint8_t         positionLight   = 0;       // 0-9 → 0-50% brightness
-  bool            moWaveEnabled   = false;
-  uint8_t         lowBeamMode     = 0;       // 0 = on after engine start
+  bool            moWaveEnabled   = false;   // legacy (kept for BLE payload compatibility)
+  uint8_t         lowBeamMode     = 0;       // 0 = standard, 1 = always with ignition, 2 = manual only
   uint8_t         aux1Mode        = 0;
   uint8_t         aux2Mode        = 0;
   uint8_t         standKillMode   = 0;       // %3: 0=N/O, 1=N/C, 2=disabled
   uint8_t         parkingLightMode = 0;
+  uint8_t         daytimeLightSource = 0;    // 0=off,1=low,2=high,3=aux1,4=aux2
+  uint8_t         daytimeLightDimPercent = 50;  // 25/50/75/100
   uint16_t        turnDistancePulsesTarget = 50;
+  char            bikeBrand[24]   = "";
+  char            bikeModel[24]   = "";
+  char            driverName[24]  = "";
+  bool            profileSetupSkipped = false;
 };
 
 // ============================================================================
@@ -88,11 +94,6 @@ struct BikeState {
   // Flasher
   unsigned long lastFlasherToggle = 0;
   bool          flasherState      = false;
-
-  // mo.wave sequential animation
-  uint8_t       waveStep          = 0;    // Current step (0 = both off, 1-2 = sequence, 3 = both on)
-  unsigned long waveStepStart     = 0;    // millis() when current step began
-  bool          wavePhaseOn       = true; // Current blink phase (on/off)
 
   // Speed sensor
   unsigned long speedPulseCount = 0;

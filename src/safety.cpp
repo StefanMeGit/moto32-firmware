@@ -64,6 +64,12 @@ float safetyGetVoltage() {
   return bike.batteryVoltage;
 }
 
+bool safetyIsCriticalLowVoltage() {
+  float v = bike.batteryVoltage;
+  if (v < VBAT_PRESENT_MIN_VOLTAGE) return false;
+  return v < VBAT_CRITICAL_LOW;
+}
+
 void safetyCheckVoltage() {
   float v = bike.batteryVoltage;
 
@@ -77,7 +83,7 @@ void safetyCheckVoltage() {
   }
 
   // Low voltage
-  if (v < VBAT_CRITICAL_LOW) {
+  if (safetyIsCriticalLowVoltage()) {
     bike.errorFlags |= ERR_LOW_VOLTAGE;
     bike.lowVoltageWarning = true;
     LOG_W("CRITICAL: Battery voltage %.1fV – shutting down non-essential", v);

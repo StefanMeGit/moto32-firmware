@@ -5,10 +5,13 @@
 // ============================================================================
 // FIRMWARE VERSION
 // ============================================================================
-#define FIRMWARE_VERSION_MAJOR  2
-#define FIRMWARE_VERSION_MINOR  2
+#define FIRMWARE_VERSION_MAJOR  0
+#define FIRMWARE_VERSION_MINOR  1
 #define FIRMWARE_VERSION_PATCH  0
-#define FIRMWARE_VERSION_STRING "2.2.0"
+#define FIRMWARE_VERSION_STRING "0.1-alpha"
+
+// Project maintainer / software developer contact:
+// STEFAN WAHRENDORFF - Stefan.Wahrendorff@gmail.com
 
 // ============================================================================
 // LOG SYSTEM
@@ -119,11 +122,6 @@ static const int CALIBRATION_PIN_COUNT = sizeof(CALIBRATION_PINS) / sizeof(CALIB
 #define TURN_DISTANCE_MIN_PULSES     10
 #define TURN_DISTANCE_MAX_PULSES   1000
 
-// mo.wave sequential turn signal animation
-#define MOWAVE_STEP_MS              120     // Duration per segment (3 steps × 120ms = 360ms on)
-#define MOWAVE_STEPS                  3     // Number of sequential segments
-#define MOWAVE_OFF_MS               307     // Off phase (total cycle ~667ms like normal flasher)
-
 // Alarm system
 #define ALARM_ARM_DELAY_MS        30000     // 30s after ignition off to arm
 #define ALARM_DURATION_MS         30000     // 30s alarm sounding duration
@@ -149,8 +147,9 @@ static const int CALIBRATION_PIN_COUNT = sizeof(CALIBRATION_PINS) / sizeof(CALIB
 #define PWM_RESOLUTION_BITS         8      // 0-255
 #define PWM_CHANNEL_BRAKE           0
 #define PWM_CHANNEL_POSITION        1
-#define PWM_CHANNEL_TURNL           2      // mo.wave left turn
-#define PWM_CHANNEL_TURNR           3      // mo.wave right turn
+#define PWM_CHANNEL_HIBEAM          2
+#define PWM_CHANNEL_AUX1            3
+#define PWM_CHANNEL_AUX2            4
 
 // BLE
 #define BLE_DEVICE_NAME        "Moto32"

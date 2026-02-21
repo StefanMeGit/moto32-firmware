@@ -10,8 +10,36 @@ static bool db_initialized[MAX_PIN] = {};
 static bool db_stableState[MAX_PIN] = {};
 static bool db_lastReading[MAX_PIN] = {};
 static unsigned long db_lastChangeTime[MAX_PIN] = {};
+static bool manual_override_enabled[MAX_PIN] = {};
+static bool manual_override_state[MAX_PIN] = {};
+
+void inputSetManualOverride(int pin, bool enabled, bool active) {
+  if (pin < 0 || pin >= MAX_PIN) return;
+  manual_override_enabled[pin] = enabled;
+  manual_override_state[pin] = active;
+}
+
+bool inputIsManualOverrideEnabled(int pin) {
+  if (pin < 0 || pin >= MAX_PIN) return false;
+  return manual_override_enabled[pin];
+}
+
+bool inputGetManualOverrideState(int pin) {
+  if (pin < 0 || pin >= MAX_PIN) return false;
+  return manual_override_state[pin];
+}
+
+void inputClearAllManualOverrides() {
+  for (int pin = 0; pin < MAX_PIN; pin++) {
+    manual_override_enabled[pin] = false;
+    manual_override_state[pin] = false;
+  }
+}
 
 bool inputRawActive(int pin) {
+  if (pin >= 0 && pin < MAX_PIN && manual_override_enabled[pin]) {
+    return manual_override_state[pin];
+  }
   if (pin == PIN_LOCK) {
     return digitalRead(pin) == HIGH;   // LOCK connects to +12V
   }
@@ -22,6 +50,15 @@ bool inputActive(int pin) {
   if (pin < 0 || pin >= MAX_PIN) {
     LOG_E("inputActive: invalid pin %d", pin);
     return false;   // FIX: return safe default, not raw read
+  }
+
+  if (manual_override_enabled[pin]) {
+    bool forced = manual_override_state[pin];
+    db_initialized[pin] = true;
+    db_stableState[pin] = forced;
+    db_lastReading[pin] = forced;
+    db_lastChangeTime[pin] = millis();
+    return forced;
   }
 
   bool reading = inputRawActive(pin);
@@ -102,6 +139,13 @@ void handleSpeedSensor() {
 
   if (speedState && !lastSpeedState) {
     bike.speedPulseCount++;
+    // Engine/RPM latch: once pulses are present with ignition on, consider
+    // engine running until a higher-priority safety path (kill/ignition off)
+    // clears it.
+    if (bike.ignitionOn && !bike.killActive && !bike.engineRunning) {
+      bike.engineRunning = true;
+      LOG_I("Engine RUNNING (RPM pulse detected)");
+    }
   }
   lastSpeedState = speedState;
 }

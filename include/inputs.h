@@ -18,3 +18,9 @@ void refreshInputEvents();
 
 // Speed sensor pulse counting (call every loop)
 void handleSpeedSensor();
+
+// Manual input overrides (for ADVANCED diagnostics control)
+void inputSetManualOverride(int pin, bool enabled, bool active);
+bool inputIsManualOverrideEnabled(int pin);
+bool inputGetManualOverrideState(int pin);
+void inputClearAllManualOverrides();

@@ -3,6 +3,7 @@
 #include "settings_store.h"
 #include "outputs.h"
 #include "ble_interface.h"
+#include "safety.h"
 #include "web_ui_embedded.h"
 
 #include <WiFi.h>
@@ -12,6 +13,7 @@
 #include <Update.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <ctype.h>
 
 static AsyncWebServer  server(80);
 static AsyncWebSocket  ws("/ws");
@@ -36,24 +38,49 @@ static const char* AP_PASS = "moto3232";  // min 8 chars
 struct ManualOutputOverride {
   const char* id;
   int         pin;
+  bool        allowManualForce;
   bool        forcedOn;
 };
 
+struct ManualInputOverride {
+  const char* id;
+  int         pin;
+  bool        enabled;
+  bool        forcedActive;
+};
+
 static ManualOutputOverride manualOutputOverrides[] = {
-  {"turnLOut", PIN_TURNL_OUT, false},
-  {"turnROut", PIN_TURNR_OUT, false},
-  {"lightOut", PIN_LIGHT_OUT, false},
-  {"hibeam",   PIN_HIBEAM_OUT, false},
-  {"brakeOut", PIN_BRAKE_OUT, false},
-  {"hornOut",  PIN_HORN_OUT, false},
-  {"start1",   PIN_START_OUT1, false},
-  {"start2",   PIN_START_OUT2, false},
-  {"ignOut",   PIN_IGN_OUT, false},
-  {"aux1Out",  PIN_AUX1_OUT, false},
-  {"aux2Out",  PIN_AUX2_OUT, false}
+  {"turnLOut", PIN_TURNL_OUT, true,  false},
+  {"turnROut", PIN_TURNR_OUT, true,  false},
+  {"lightOut", PIN_LIGHT_OUT, true,  false},
+  {"hibeam",   PIN_HIBEAM_OUT, true,  false},
+  {"brakeOut", PIN_BRAKE_OUT, true,  false},
+  {"hornOut",  PIN_HORN_OUT, true,  false},
+  {"start1",   PIN_START_OUT1, false, false},
+  {"start2",   PIN_START_OUT2, false, false},
+  {"ignOut",   PIN_IGN_OUT, false, false},
+  {"aux1Out",  PIN_AUX1_OUT, true,  false},
+  {"aux2Out",  PIN_AUX2_OUT, true,  false}
 };
 static const size_t MANUAL_OUTPUT_OVERRIDE_COUNT =
     sizeof(manualOutputOverrides) / sizeof(manualOutputOverrides[0]);
+
+static ManualInputOverride manualInputOverrides[] = {
+  {"lock",  PIN_LOCK,  false, false},
+  {"turnL", PIN_TURNL, false, false},
+  {"turnR", PIN_TURNR, false, false},
+  {"light", PIN_LIGHT, false, false},
+  {"start", PIN_START, false, false},
+  {"horn",  PIN_HORN,  false, false},
+  {"brake", PIN_BRAKE, false, false},
+  {"kill",  PIN_KILL,  false, false},
+  {"stand", PIN_STAND, false, false},
+  {"aux1",  PIN_AUX1,  false, false},
+  {"aux2",  PIN_AUX2,  false, false},
+  {"speed", PIN_SPEED, false, false}
+};
+static const size_t MANUAL_INPUT_OVERRIDE_COUNT =
+    sizeof(manualInputOverrides) / sizeof(manualInputOverrides[0]);
 static bool turnDistanceCalibrationActive = false;
 static unsigned long turnDistanceCalibrationStartPulses = 0;
 
@@ -67,7 +94,11 @@ enum class WebActionType : uint8_t {
   STOP_SCAN,
   PAIR_DEVICE,
   REMOVE_PAIRED,
+  CLEAR_INPUT_OVERRIDES,
+  TOGGLE_INPUT,
+  CLEAR_INPUT_OVERRIDE,
   TOGGLE_OUTPUT,
+  CLEAR_OUTPUT_OVERRIDE,
   TOGGLE_AUX1,
   TOGGLE_AUX2,
   RESTART
@@ -77,9 +108,12 @@ struct WebAction {
   WebActionType type;
   Settings settings;
   bool keylessEnabled;
-  int keylessRssiThreshold;
-  int keylessGraceSeconds;
+  int keylessRssiLevel;
+  int keylessActiveMinutes;
+  int keylessActivationMode;
+  int keylessActivationButton;
   char mac[18];
+  char inputId[16];
   char outputId[16];
 };
 
@@ -96,9 +130,40 @@ static ManualOutputOverride* findManualOverrideById(const char* id) {
   return nullptr;
 }
 
+static ManualInputOverride* findManualInputOverrideById(const char* id) {
+  if (!id) return nullptr;
+  for (size_t i = 0; i < MANUAL_INPUT_OVERRIDE_COUNT; i++) {
+    if (strcmp(manualInputOverrides[i].id, id) == 0) {
+      return &manualInputOverrides[i];
+    }
+  }
+  return nullptr;
+}
+
+static bool isVoltageProtectedManualPin(int pin) {
+  return pin == PIN_HORN_OUT || pin == PIN_AUX1_OUT || pin == PIN_AUX2_OUT;
+}
+
+static bool canKeepManualOverrideOn(const ManualOutputOverride& ovr, bool logReason) {
+  if (!ovr.allowManualForce) {
+    if (logReason) {
+      LOG_W("Manual override blocked for safety-critical output: %s", ovr.id);
+    }
+    return false;
+  }
+  if (!bike.ignitionOn) return false;
+  if (isVoltageProtectedManualPin(ovr.pin) && safetyIsCriticalLowVoltage()) {
+    if (logReason) {
+      LOG_W("Manual override blocked by critical low voltage: %s", ovr.id);
+    }
+    return false;
+  }
+  return true;
+}
+
 static bool isManualOverrideForcedOn(const char* id) {
   ManualOutputOverride* ovr = findManualOverrideById(id);
-  return ovr ? ovr->forcedOn : false;
+  return ovr ? (ovr->forcedOn && canKeepManualOverrideOn(*ovr, false)) : false;
 }
 
 static bool enqueueWsAction(const WebAction& action, const char* cmd) {
@@ -111,6 +176,30 @@ static bool enqueueWsAction(const WebAction& action, const char* cmd) {
     return false;
   }
   return true;
+}
+
+static void copySettingString(char* dst, size_t dstSize, const char* src) {
+  if (!dst || dstSize == 0) return;
+  if (!src) {
+    dst[0] = '\0';
+    return;
+  }
+  snprintf(dst, dstSize, "%s", src);
+}
+
+static bool hasVisibleChars(const char* text) {
+  if (!text) return false;
+  while (*text) {
+    if (!isspace((unsigned char)*text)) return true;
+    text++;
+  }
+  return false;
+}
+
+static bool profileReady(const Settings& s) {
+  return hasVisibleChars(s.bikeBrand)
+      && hasVisibleChars(s.bikeModel)
+      && hasVisibleChars(s.driverName);
 }
 
 // ============================================================================
@@ -134,7 +223,7 @@ static void buildStateJson(JsonDocument& doc) {
 
   // Inputs
   JsonObject ins = doc["inputs"].to<JsonObject>();
-  ins["lock"]  = bike.ignitionOn;
+  ins["lock"]  = lockEvent.state;
   ins["turnL"] = turnLeftEvent.state;
   ins["turnR"] = turnRightEvent.state;
   ins["light"] = lightEvent.state;
@@ -145,8 +234,18 @@ static void buildStateJson(JsonDocument& doc) {
   ins["stand"] = bike.standDown;
   ins["aux1"]  = inputActive(PIN_AUX1);
   ins["aux2"]  = inputActive(PIN_AUX2);
-  ins["speed"] = false;
+  ins["speed"] = inputActive(PIN_SPEED);
   ins["speed_info"] = String(bike.speedPulseCount) + " Pulse";
+  for (size_t i = 0; i < MANUAL_INPUT_OVERRIDE_COUNT; i++) {
+    char key[24];
+    snprintf(key, sizeof(key), "%s_manual", manualInputOverrides[i].id);
+    ins[key] = manualInputOverrides[i].enabled;
+    if (manualInputOverrides[i].enabled) {
+      char stateKey[30];
+      snprintf(stateKey, sizeof(stateKey), "%s_manual_state", manualInputOverrides[i].id);
+      ins[stateKey] = manualInputOverrides[i].forcedActive;
+    }
+  }
 
   // Outputs
   JsonObject outs = doc["outputs"].to<JsonObject>();
@@ -155,7 +254,8 @@ static void buildStateJson(JsonDocument& doc) {
   outs["lightOut"] = bike.lowBeamOn;
   outs["hibeam"]   = bike.highBeamOn;
   outs["brakeOut"] = bike.brakePressed;
-  outs["hornOut"]  = bike.hornPressed && bike.ignitionOn;
+  outs["hornOut"]  = bike.hornPressed && bike.ignitionOn
+      && !safetyIsCriticalLowVoltage();
   outs["start1"]   = bike.starterEngaged;
   outs["start2"]   = bike.starterEngaged;
   outs["ignOut"]   = bike.ignitionOn && !bike.killActive;
@@ -181,6 +281,11 @@ static void buildStateJson(JsonDocument& doc) {
   if (isManualOverrideForcedOn("ignOut"))   outs["ignOut"] = true;
   if (isManualOverrideForcedOn("aux1Out"))  outs["aux1Out"] = true;
   if (isManualOverrideForcedOn("aux2Out"))  outs["aux2Out"] = true;
+  for (size_t i = 0; i < MANUAL_OUTPUT_OVERRIDE_COUNT; i++) {
+    char key[28];
+    snprintf(key, sizeof(key), "%s_manual", manualOutputOverrides[i].id);
+    outs[key] = manualOutputOverrides[i].forcedOn;
+  }
 }
 
 static void buildSettingsJson(JsonDocument& doc) {
@@ -191,13 +296,20 @@ static void buildSettingsJson(JsonDocument& doc) {
   doc["brake"]     = settings.brakeLightMode;
   doc["alarm"]     = settings.alarmMode;
   doc["pos"]       = settings.positionLight;
-  doc["wave"]      = settings.moWaveEnabled ? 1 : 0;
   doc["low"]       = settings.lowBeamMode;
   doc["aux1"]      = settings.aux1Mode;
   doc["aux2"]      = settings.aux2Mode;
   doc["stand"]     = settings.standKillMode;
   doc["park"]      = settings.parkingLightMode;
+  doc["drlsrc"]    = settings.daytimeLightSource;
+  doc["drldim"]    = settings.daytimeLightDimPercent;
   doc["tdist"]     = settings.turnDistancePulsesTarget;
+  doc["bikeBrand"] = settings.bikeBrand;
+  doc["bikeModel"] = settings.bikeModel;
+  doc["driverName"] = settings.driverName;
+  doc["profileReady"] = profileReady(settings);
+  doc["profileSkip"] = settings.profileSetupSkipped;
+  doc["firmware"] = FIRMWARE_VERSION_STRING;
 }
 
 static void broadcastSettingsJson() {
@@ -258,8 +370,10 @@ static void processQueuedWsActions() {
 
       case WebActionType::SET_KEYLESS:
         bleKeylessConfigure(action.keylessEnabled,
-                            action.keylessRssiThreshold,
-                            action.keylessGraceSeconds);
+                            action.keylessRssiLevel,
+                            action.keylessActiveMinutes,
+                            action.keylessActivationMode,
+                            action.keylessActivationButton);
         break;
 
       case WebActionType::START_SCAN:
@@ -278,12 +392,67 @@ static void processQueuedWsActions() {
         bleRemovePaired(action.mac);
         break;
 
+      case WebActionType::CLEAR_INPUT_OVERRIDES:
+        for (size_t i = 0; i < MANUAL_INPUT_OVERRIDE_COUNT; i++) {
+          manualInputOverrides[i].enabled = false;
+          manualInputOverrides[i].forcedActive = false;
+        }
+        inputClearAllManualOverrides();
+        LOG_I("Manual input overrides cleared");
+        break;
+
+      case WebActionType::TOGGLE_INPUT: {
+        ManualInputOverride* ovr = findManualInputOverrideById(action.inputId);
+        if (ovr) {
+          if (!ovr->enabled) {
+            ovr->enabled = true;
+            ovr->forcedActive = true;
+          } else if (ovr->forcedActive) {
+            ovr->enabled = true;
+            ovr->forcedActive = false;
+          } else {
+            ovr->enabled = false;
+            ovr->forcedActive = false;
+          }
+          inputSetManualOverride(ovr->pin, ovr->enabled, ovr->forcedActive);
+          LOG_W("Manual input override %s: %s",
+                action.inputId,
+                !ovr->enabled ? "LIVE"
+                              : (ovr->forcedActive ? "MANUAL ON" : "MANUAL OFF"));
+        }
+        break;
+      }
+
+      case WebActionType::CLEAR_INPUT_OVERRIDE: {
+        ManualInputOverride* ovr = findManualInputOverrideById(action.inputId);
+        if (ovr) {
+          ovr->enabled = false;
+          ovr->forcedActive = false;
+          inputSetManualOverride(ovr->pin, false, false);
+          LOG_I("Manual input override cleared: %s", action.inputId);
+        }
+        break;
+      }
+
       case WebActionType::TOGGLE_OUTPUT: {
         ManualOutputOverride* ovr = findManualOverrideById(action.outputId);
         if (ovr) {
-          ovr->forcedOn = !ovr->forcedOn;
+          const bool enable = !ovr->forcedOn;
+          if (enable && !canKeepManualOverrideOn(*ovr, true)) {
+            break;
+          }
+          ovr->forcedOn = enable;
           LOG_W("Manual output override %s: %s",
                 action.outputId, ovr->forcedOn ? "ON" : "OFF");
+        }
+        break;
+      }
+
+      case WebActionType::CLEAR_OUTPUT_OVERRIDE: {
+        ManualOutputOverride* ovr = findManualOverrideById(action.outputId);
+        if (ovr && ovr->forcedOn) {
+          ovr->forcedOn = false;
+          LOG_I("Manual output override cleared: %s", action.outputId);
         }
         break;
       }
@@ -353,14 +522,52 @@ static void handleWsMessage(AsyncWebSocketClient* client, const char* data, size
         constrain((int)d["brake"], BRAKE_CONTINUOUS, BRAKE_EMERGENCY));
     action.settings.alarmMode        = d["alarm"] | 0;
     action.settings.positionLight    = constrain((int)d["pos"], 0, 9);
-    action.settings.moWaveEnabled    = (int)d["wave"] != 0;
+    action.settings.moWaveEnabled    = false;
     action.settings.lowBeamMode      = d["low"] | 0;
     action.settings.aux1Mode         = d["aux1"] | 0;
     action.settings.aux2Mode         = d["aux2"] | 0;
     action.settings.standKillMode    = d["stand"] | 0;
     action.settings.parkingLightMode = d["park"] | 0;
+    action.settings.daytimeLightSource = constrain((int)d["drlsrc"], 0, 4);
+    {
+      int drlDim = d["drldim"] | 50;
+      if (drlDim != 25 && drlDim != 50 && drlDim != 75 && drlDim != 100) {
+        drlDim = 50;
+      }
+      action.settings.daytimeLightDimPercent = drlDim;
+    }
     action.settings.turnDistancePulsesTarget = constrain(
         (int)d["tdist"], TURN_DISTANCE_MIN_PULSES, TURN_DISTANCE_MAX_PULSES);
+    if (d["bikeBrand"].is<const char*>()) {
+      copySettingString(action.settings.bikeBrand,
+                        sizeof(action.settings.bikeBrand),
+                        d["bikeBrand"]);
+    } else if (d["brand"].is<const char*>()) {
+      copySettingString(action.settings.bikeBrand,
+                        sizeof(action.settings.bikeBrand),
+                        d["brand"]);
+    }
+    if (d["bikeModel"].is<const char*>()) {
+      copySettingString(action.settings.bikeModel,
+                        sizeof(action.settings.bikeModel),
+                        d["bikeModel"]);
+    } else if (d["model"].is<const char*>()) {
+      copySettingString(action.settings.bikeModel,
+                        sizeof(action.settings.bikeModel),
+                        d["model"]);
+    }
+    if (d["driverName"].is<const char*>()) {
+      copySettingString(action.settings.driverName,
+                        sizeof(action.settings.driverName),
+                        d["driverName"]);
+    } else if (d["driver"].is<const char*>()) {
+      copySettingString(action.settings.driverName,
+                        sizeof(action.settings.driverName),
+                        d["driver"]);
+    }
+    if (d["profileSkip"].is<bool>()) {
+      action.settings.profileSetupSkipped = d["profileSkip"];
+    }
     enqueueWsAction(action, cmd);
   }
 
@@ -399,8 +606,22 @@ static void handleWsMessage(AsyncWebSocketClient* client, const char* data, size
     WebAction action = {};
     action.type = WebActionType::SET_KEYLESS;
     action.keylessEnabled = d["enabled"] | false;
-    action.keylessRssiThreshold = d["rssiThreshold"] | -65;
-    action.keylessGraceSeconds = d["graceSeconds"] | 10;
+    int requestedLevel = d["rssiLevel"] | 0;
+    if (requestedLevel >= 1 && requestedLevel <= 6) {
+      action.keylessRssiLevel = requestedLevel;
+    } else {
+      // Backward compatibility for older web clients that still send dBm.
+      action.keylessRssiLevel = d["rssiThreshold"] | 4;
+    }
+    const int requestedMinutes = d["activeMinutes"] | 0;
+    if (requestedMinutes > 0) {
+      action.keylessActiveMinutes = requestedMinutes;
+    } else {
+      // Backward compatibility for older web clients that still send grace seconds.
+      action.keylessActiveMinutes = d["graceSeconds"] | 300;
+    }
+    action.keylessActivationMode = d["activationMode"] | 0;
+    action.keylessActivationButton = d["activationButton"] | 0;
     enqueueWsAction(action, cmd);
   }
 
@@ -442,12 +663,73 @@ static void handleWsMessage(AsyncWebSocketClient* client, const char* data, size
     }
   }
 
+  else if (strcmp(cmd, "clearInputOverrides") == 0) {
+    WebAction action = {};
+    action.type = WebActionType::CLEAR_INPUT_OVERRIDES;
+    enqueueWsAction(action, cmd);
+  }
+
+  // ---- Direct input toggle (ADVANCED mode in UI) ----
+  else if (strcmp(cmd, "toggleInput") == 0) {
+    const char* id = doc["id"];
+    if (id) {
+      ManualInputOverride* ovr = findManualInputOverrideById(id);
+      if (!ovr) {
+        LOG_W("Web: toggleInput ignored, unknown id=%s", id);
+        return;
+      }
+      WebAction action = {};
+      action.type = WebActionType::TOGGLE_INPUT;
+      snprintf(action.inputId, sizeof(action.inputId), "%s", id);
+      enqueueWsAction(action, cmd);
+    }
+  }
+
+  else if (strcmp(cmd, "clearInputOverride") == 0) {
+    const char* id = doc["id"];
+    if (id) {
+      ManualInputOverride* ovr = findManualInputOverrideById(id);
+      if (!ovr) {
+        LOG_W("Web: clearInputOverride ignored, unknown id=%s", id);
+        return;
+      }
+      WebAction action = {};
+      action.type = WebActionType::CLEAR_INPUT_OVERRIDE;
+      snprintf(action.inputId, sizeof(action.inputId), "%s", id);
+      enqueueWsAction(action, cmd);
+    }
+  }
+
   // ---- Direct output toggle (ADVANCED mode in UI) ----
   else if (strcmp(cmd, "toggleOutput") == 0) {
     const char* id = doc["id"];
     if (id) {
+      ManualOutputOverride* ovr = findManualOverrideById(id);
+      if (!ovr) {
+        LOG_W("Web: toggleOutput ignored, unknown id=%s", id);
+        return;
+      }
+      if (!ovr->allowManualForce) {
+        LOG_W("Web: toggleOutput blocked for critical output id=%s", id);
+        return;
+      }
       WebAction action = {};
       action.type = WebActionType::TOGGLE_OUTPUT;
+      snprintf(action.outputId, sizeof(action.outputId), "%s", id);
+      enqueueWsAction(action, cmd);
+    }
+  }
+
+  else if (strcmp(cmd, "clearOutputOverride") == 0) {
+    const char* id = doc["id"];
+    if (id) {
+      ManualOutputOverride* ovr = findManualOverrideById(id);
+      if (!ovr) {
+        LOG_W("Web: clearOutputOverride ignored, unknown id=%s", id);
+        return;
+      }
+      WebAction action = {};
+      action.type = WebActionType::CLEAR_OUTPUT_OVERRIDE;
       snprintf(action.outputId, sizeof(action.outputId), "%s", id);
       enqueueWsAction(action, cmd);
     }
@@ -500,6 +782,8 @@ static void onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
 // ============================================================================
 
 void webInit() {
+  inputClearAllManualOverrides();
+
   // WiFi Access Point
   WiFi.mode(WIFI_AP);
   WiFi.softAP(AP_SSID, AP_PASS);
@@ -526,7 +810,7 @@ void webInit() {
 
   // Serve embedded Web UI directly from firmware image.
   server.on("/", HTTP_GET, [](AsyncWebServerRequest* req) {
-    AsyncWebServerResponse* resp = req->beginResponse_P(
+    AsyncWebServerResponse* resp = req->beginResponse(
       200, "text/html; charset=utf-8",
       reinterpret_cast<const uint8_t*>(WEB_UI_HTML), WEB_UI_HTML_LEN);
     req->send(resp);
@@ -638,10 +922,28 @@ void webInit() {
 }
 
 void webApplyOutputOverrides() {
-  for (size_t i = 0; i < MANUAL_OUTPUT_OVERRIDE_COUNT; i++) {
-    if (manualOutputOverrides[i].forcedOn) {
-      outputOn(manualOutputOverrides[i].pin);
+  if (!bike.ignitionOn) {
+    bool cleared = false;
+    for (size_t i = 0; i < MANUAL_OUTPUT_OVERRIDE_COUNT; i++) {
+      if (manualOutputOverrides[i].forcedOn) {
+        manualOutputOverrides[i].forcedOn = false;
+        cleared = true;
+      }
     }
+    if (cleared) {
+      LOG_I("Manual output overrides cleared (ignition off)");
+    }
+    return;
+  }
+
+  for (size_t i = 0; i < MANUAL_OUTPUT_OVERRIDE_COUNT; i++) {
+    ManualOutputOverride& ovr = manualOutputOverrides[i];
+    if (!ovr.forcedOn) continue;
+    if (!canKeepManualOverrideOn(ovr, true)) {
+      ovr.forcedOn = false;
+      continue;
+    }
+    outputOn(ovr.pin);
   }
 }
 
